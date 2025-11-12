@@ -56,7 +56,10 @@ export OBSIDIAN_MCP_KEY="your-api-key-here"
   "mcpServers": {
     "obsidian": {
       "command": "python",
-      "args": ["C:/Users/sthat/Source/Repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"]
+      "args": ["C:/Users/sthat/Source/Repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"],
+      "env": {
+        "OBSIDIAN_MCP_KEY": "your-api-key-from-plugin-settings"
+      }
     }
   }
 }
@@ -69,6 +72,7 @@ export OBSIDIAN_MCP_KEY="your-api-key-here"
 name = "obsidian-direct"
 command = "python"
 args = ["C:/Users/sthat/Source/Repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"]
+env = { OBSIDIAN_MCP_KEY = "your-api-key-from-plugin-settings" }
 ```
 
 ## Features
