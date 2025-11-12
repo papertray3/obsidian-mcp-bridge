@@ -64,10 +64,12 @@ obsidian-mcp-bridge/
   "id": "obsidian-mcp-bridge",
   "name": "MCP Bridge",
   "version": "0.1.0",
-  "author": "Your Name",
-  "authorUrl": "https://github.com/yourusername/obsidian-mcp-bridge"
+  "author": "papertray3",
+  "authorUrl": "https://github.com/papertray3/obsidian-mcp-bridge"
 }
 ```
+
+✅ **Already done!**
 
 ---
 
@@ -115,7 +117,7 @@ pip install obsidian-mcp-bridge
 
 Users install:
 ```bash
-git clone https://github.com/yourusername/obsidian-mcp-bridge
+git clone https://github.com/papertray3/obsidian-mcp-bridge
 cd obsidian-mcp-bridge/mcp-server
 pip install -r requirements.txt
 ```
@@ -195,8 +197,8 @@ pip install -r requirements.txt
 
 Replace these in all files:
 - `"Your Name"` → Your actual name
-- `"yourusername"` → Your GitHub username
-- `https://github.com/yourusername/obsidian-mcp-bridge` → Actual repo URL
+- ✅ `"yourusername"` → `papertray3` (Done!)
+- ✅ GitHub URL → `https://github.com/papertray3/obsidian-mcp-bridge` (Done!)
 
 **Files to update:**
 - `plugin/manifest.json`
@@ -212,7 +214,7 @@ Replace these in all files:
 
 # In your local repo:
 cd C:\Users\sthat\Source\Repos\obsidian-mcp-bridge
-git remote add origin https://github.com/yourusername/obsidian-mcp-bridge.git
+git remote add origin https://github.com/papertray3/obsidian-mcp-bridge.git
 git branch -M main
 git push -u origin main
 ```
@@ -222,9 +224,9 @@ git push -u origin main
 ```markdown
 # Obsidian MCP Bridge
 
-![GitHub release](https://img.shields.io/github/v/release/yourusername/obsidian-mcp-bridge)
-![GitHub stars](https://img.shields.io/github/stars/yourusername/obsidian-mcp-bridge)
-![License](https://img.shields.io/github/license/yourusername/obsidian-mcp-bridge)
+![GitHub release](https://img.shields.io/github/v/release/papertray3/obsidian-mcp-bridge)
+![GitHub stars](https://img.shields.io/github/stars/papertray3/obsidian-mcp-bridge)
+![License](https://img.shields.io/github/license/papertray3/obsidian-mcp-bridge)
 ```
 
 ### Step 4: Add Topics on GitHub

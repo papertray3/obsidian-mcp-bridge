@@ -1,6 +1,5 @@
-import { WebSocketServer, WebSocket } from 'ws';
-import type { IncomingMessage } from 'http';
 import type MCPBridgePlugin from './main';
+import { SimpleWebSocketServer, SimpleWebSocket } from './simple-websocket';
 
 export interface MCPRequest {
 	auth?: string;
@@ -14,7 +13,9 @@ export interface MCPResponse {
 }
 
 export class MCPWebSocketServer {
-	private wss: WebSocketServer | null = null;
+	private httpServer: any = null;
+	private wsServer: SimpleWebSocketServer | null = null;
+	private clients: Set<SimpleWebSocket> = new Set();
 	private plugin: MCPBridgePlugin;
 
 	constructor(plugin: MCPBridgePlugin) {
@@ -22,67 +23,92 @@ export class MCPWebSocketServer {
 	}
 
 	start(): void {
-		if (this.wss) {
+		if (this.httpServer) {
 			console.warn('MCP Bridge: WebSocket server already running');
 			return;
 		}
 
-		const { host, port, enableSSL, certPath, keyPath } = this.plugin.settings;
-
-		// TODO: SSL support (Phase 5+)
-		const serverOptions: any = {
-			host,
-			port,
-		};
+		const { host, port } = this.plugin.settings;
 
 		try {
-			this.wss = new WebSocketServer(serverOptions);
+			// Create HTTP server using Node.js built-in
+			const http = require('http');
+			this.httpServer = http.createServer();
 
-			this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+			// Create our simple WebSocket server
+			this.wsServer = new SimpleWebSocketServer(this.httpServer);
+
+			this.wsServer.onconnection = (ws: SimpleWebSocket, req: any) => {
 				console.log('MCP Bridge: Client connected');
+				this.clients.add(ws);
 
 				// Check origin if remote access enabled
 				if (this.plugin.settings.enableRemote) {
 					const origin = req.headers.origin;
 					if (!this.isOriginAllowed(origin)) {
 						console.warn(`MCP Bridge: Origin not allowed: ${origin}`);
-						ws.close(1008, 'Origin not allowed');
+						ws.close();
 						return;
 					}
 				}
 
 				this.handleConnection(ws);
-			});
 
-			this.wss.on('error', (error: Error) => {
+				ws.onclose = () => {
+					this.clients.delete(ws);
+					console.log('MCP Bridge: Client disconnected');
+				};
+			};
+
+			this.wsServer.onerror = (error: Error) => {
 				console.error('MCP Bridge: WebSocket server error:', error);
+			};
+
+			// Start HTTP server with better error handling
+			this.httpServer.on('error', (err: any) => {
+				console.error('MCP Bridge: HTTP server error:', err);
+				if (err.code === 'EADDRINUSE') {
+					console.error(`Port ${port} is already in use. Change port in settings.`);
+				}
 			});
 
-			console.log(`MCP Bridge: WebSocket server listening on ${host}:${port}`);
+			// Log immediately that we're trying to start
+			console.log(`MCP Bridge: Attempting to start server on ${host}:${port}...`);
+
+			this.httpServer.listen(port, host, () => {
+				console.log(`MCP Bridge: ✅ WebSocket server listening on ${host}:${port}`);
+			});
 
 		} catch (error) {
 			console.error('MCP Bridge: Failed to start WebSocket server:', error);
+			console.error('MCP Bridge: Error details:', error);
 			throw error;
 		}
 	}
 
 	stop(): void {
-		if (this.wss) {
-			this.wss.close(() => {
+		// Close all client connections
+		for (const client of this.clients) {
+			client.close();
+		}
+		this.clients.clear();
+
+		if (this.httpServer) {
+			this.httpServer.close(() => {
 				console.log('MCP Bridge: WebSocket server stopped');
 			});
-			this.wss = null;
+			this.httpServer = null;
 		}
 	}
 
 	isRunning(): boolean {
-		return this.wss !== null;
+		return this.httpServer !== null;
 	}
 
-	private handleConnection(ws: WebSocket): void {
-		ws.on('message', async (data: Buffer) => {
+	private handleConnection(ws: SimpleWebSocket): void {
+		ws.onmessage = async (msg) => {
 			try {
-				const request = JSON.parse(data.toString()) as MCPRequest;
+				const request = JSON.parse(msg.data) as MCPRequest;
 
 				// Authenticate
 				if (this.plugin.settings.requireAuth) {
@@ -107,15 +133,11 @@ export class MCPWebSocketServer {
 				};
 				ws.send(JSON.stringify(response));
 			}
-		});
+		};
 
-		ws.on('error', (error: Error) => {
+		ws.onerror = (error: Error) => {
 			console.error('MCP Bridge: WebSocket connection error:', error);
-		});
-
-		ws.on('close', () => {
-			console.log('MCP Bridge: Client disconnected');
-		});
+		};
 	}
 
 	private isOriginAllowed(origin: string | undefined): boolean {

@@ -14,7 +14,7 @@ Thank you for your interest in contributing! This document provides guidelines f
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/obsidian-mcp-bridge.git
+   git clone https://github.com/papertray3/obsidian-mcp-bridge.git
    cd obsidian-mcp-bridge
    ```
 
@@ -61,7 +61,7 @@ obsidian-mcp-bridge/
 
 ### Reporting Bugs
 
-1. Check if the bug has already been reported in [Issues](https://github.com/yourusername/obsidian-mcp-bridge/issues)
+1. Check if the bug has already been reported in [Issues](https://github.com/papertray3/obsidian-mcp-bridge/issues)
 2. If not, create a new issue with:
    - Clear description of the problem
    - Steps to reproduce

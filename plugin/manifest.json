@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "minAppVersion": "1.4.0",
   "description": "Exposes Obsidian APIs to AI clients via Model Context Protocol. Enables perfect rendering of Dataview queries, plugin access, and semantic search.",
-  "author": "Your Name",
-  "authorUrl": "https://github.com/yourusername/obsidian-mcp-bridge",
+  "author": "papertray3",
+  "authorUrl": "https://github.com/papertray3/obsidian-mcp-bridge",
   "isDesktopOnly": true
 }
