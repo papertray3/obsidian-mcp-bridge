@@ -77,19 +77,19 @@ env = { OBSIDIAN_MCP_KEY = "your-api-key-from-plugin-settings" }
 
 ## Features
 
-### Phase 1 (Current) - Proof of Concept
+### Phase 1 (Complete) - Proof of Concept
 - [x] Basic plugin scaffold
 - [x] WebSocket server
 - [x] `render_note()` - Get fully-rendered HTML
 - [x] API key authentication
 - [x] Python MCP server
 
-### Phase 2 (Planned) - Core Tools
-- [ ] `list_plugins()` - Discover installed plugins
-- [ ] `get_plugin_info()` - Plugin metadata and capabilities
-- [ ] `dataview_query()` - Execute Dataview queries
-- [ ] `search_vault()` - Simple text search
-- [ ] `list_vault_files()` - File listing
+### Phase 2 (Current) - Core Tools
+- [x] `list_plugins()` - Discover installed plugins
+- [x] `get_plugin_info()` - Plugin metadata and capabilities
+- [x] `dataview_query()` - Execute Dataview queries
+- [x] `search_vault()` - Simple filename/path search
+- [x] `list_vault_files()` - File listing
 
 ### Phase 3 (Planned) - Plugin Ecosystem
 - [ ] SmartConnections integration (semantic search)
@@ -165,7 +165,7 @@ pytest
 
 ## Project Status
 
-**Current Phase:** Phase 1 - Proof of Concept
+**Current Phase:** Phase 2 - Core Tools (discovery/search tools shipped)
 **Last Updated:** 2025-01-11
 **Status:** Active Development
 

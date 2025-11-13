@@ -93,6 +93,40 @@ List all markdown files in vault or specific folder.
 **Parameters:**
 - `folder` (string, optional): Folder to list files from
 
+### list_plugins
+List installed plugins, whether enabled or disabled.
+
+**Returns:** Array of plugin summaries containing `id`, `name`, `version`, `author`, `description`, `enabled`, `hasApi`, and `dir`.
+
+### get_plugin_info
+Get detailed information about a specific plugin.
+
+**Parameters:**
+- `plugin_id` (string): Plugin identifier (e.g., `smart-connections`)
+
+**Returns:**
+- Manifest metadata
+- Whether plugin is enabled / exposes an API
+- Available API method names (best-effort)
+- Commands registered by that plugin (IDs, names, hotkeys)
+
+### dataview_query
+Execute a Dataview query directly and return rendered markdown output (tables, lists, etc.).
+
+**Parameters:**
+- `query` (string): Dataview query text (same format as in notes)
+- `context_path` (string, optional): File path to use as the query context (`this.file`)
+
+### search_vault
+Search markdown file names and paths for a substring.
+
+**Parameters:**
+- `query` (string): Text to match (case-insensitive)
+- `folder` (string, optional): Restrict search to a folder prefix
+
+**Returns:**
+- Array of matches with `path`, `name`, `parent`, `matchType`, and detected `tags`
+
 ### ping
 Check if connection to Obsidian plugin is working.
 

@@ -1,8 +1,8 @@
 # Session State - AI Assistant Resume Point
 
-**Last Updated:** 2025-01-11
-**Current Status:** Phase 1 Complete, Claude Code Configured, Ready for First Use
-**Next AI Session:** Continue from testing with Claude Code
+**Last Updated:** 2025-11-12
+**Current Status:** Phase 2 discovery tools live; Claude & Codex verified end-to-end
+**Next AI Session:** Plan Phase 3 (plugin ecosystem) or deepen real-world usage tests
 
 ---
 
@@ -57,9 +57,9 @@ Obsidian Runtime (app.vault, app.workspace, Dataview, etc.)
     1. ✅ Ping (connection alive)
     2. ✅ List vault files (120+ files found)
     3. ✅ Get raw note (markdown retrieved)
-    4. ✅ Render note with Dataview (HTML with tables)
+4. ✅ Render note with Dataview (HTML with tables)
 
-### Tools Available
+### Tools Available (Phase 1)
 1. **`render_note(filepath)`** - Fully-rendered HTML with Dataview executed
 2. **`get_note_raw(filepath)`** - Raw markdown content
 3. **`list_vault_files(folder?)`** - List markdown files
@@ -67,51 +67,47 @@ Obsidian Runtime (app.vault, app.workspace, Dataview, etc.)
 
 ---
 
-## 🔄 Current State: Ready for First Use with Claude Code
+## ✅ Phase 2: CORE TOOLS
 
-### What User Needs to Do Next
+### What Was Added This Session
+- [x] **`list_plugins()`** – Enumerate every installed plugin (enabled + disabled) with metadata and API availability
+- [x] **`get_plugin_info(plugin_id)`** – Return manifest, enablement state, hotkeys, and exposed API method names
+- [x] **`dataview_query(query, context_path?)`** – Execute raw Dataview queries directly and return rendered markdown
+- [x] **`search_vault(query, folder?)`** – Filename/path search with parent folder + detected tags for quick triage
 
-**Step 1: Verify Obsidian is Running**
-- Vault: Digital Garden (`C:\Users\sthat\OneDrive\Documents\Obsidian\DigitalGarden\`)
-- Plugin enabled: Settings → Community Plugins → MCP Bridge (ON)
-- Server running: Settings → MCP Bridge → Server Status shows "🟢 Running"
+### Validation
+- ✅ Claude Code + Codex both exercised the new tools without errors
+- ✅ Dataview queries return rendered tables/text in-line (matches vault output)
+- ✅ Plugin discovery surfaces SmartConnections, Digital Garden, etc., enabling future API calls
 
-**Step 2: Restart Claude Code**
-- Fully quit Claude Code (not just close window)
-- Reopen Claude Code
-- MCP server should connect automatically
+### Current Tool Inventory
+1. `render_note`
+2. `get_note_raw`
+3. `list_vault_files`
+4. `ping`
+5. `list_plugins`
+6. `get_plugin_info`
+7. `dataview_query`
+8. `search_vault`
 
-**Step 3: Test Connection**
-Run these test prompts in Claude Code:
+---
 
-1. **Ping test:**
-   ```
-   Can you ping the Obsidian MCP server?
-   ```
-   Expected: `{"status": "ok", "timestamp": ...}`
+## 🔄 Current State: Phase 2 Delivered, Prep Phase 3
 
-2. **List files:**
-   ```
-   List all markdown files in my vault
-   ```
-   Expected: Array of file paths
+### Confirmation
+- ✅ Claude Code + Codex both reconnected post-updates (user reported success)
+- ✅ All eight tools exercised without regression during smoke tests
+- ✅ No errors seen in Obsidian console during the new RPC calls
 
-3. **Raw content:**
-   ```
-   Show me the raw markdown of Notes/00_Sowing/Home.md
-   ```
-   Expected: Frontmatter + markdown
+### Recommended Focus
+1. **Document real workflows** – capture prompts/results that feel valuable so we can tune future tooling (SmartConnections, Digital Garden hooks, etc.).
+2. **Plan Phase 3** – per `Direct-API-Architecture.md`, next milestone is plugin ecosystem access (SmartConnections semantic search + Digital Garden preview APIs).
+3. **Decide security requirements** – Phase 3 will likely require guarded plugin method calls; note any approval UX you want.
 
-4. **Rendered content:**
-   ```
-   Render Notes/Dashboards/🔎Garden Dashboard.md
-   ```
-   Expected: Full HTML with Dataview tables executed
-
-**Step 4: Try Real Use Cases**
-- "What's on my workbench?"
-- "Summarize my Digital Garden notes"
-- "Which public notes mention AI?"
+### Ready-To-Run Checklist (when resuming)
+- Obsidian vault + MCP Bridge plugin already running with server on `127.0.0.1:27125`.
+- Claude Code & Codex configs still point to `obsidian_mcp_server.py` with the same API key (`f62b999a-10fb-4aa0-a79e-e37b70b83687`).
+- Use new tools freely; no further setup required unless planning remote access.
 
 ---
 
@@ -196,26 +192,30 @@ Result: Pixel-perfect match to Obsidian UI
 - Python MCP server
 - Connection test passed
 
-### Phase 2: Core Tools (Next)
-**Goal:** Add essential capabilities
+### Phase 2: Core Tools ✅ COMPLETE
+- Added plugin discovery + metadata tools
+- Added direct Dataview query execution
+- Added filename/path search helper
+- Hardened request validation for new RPCs
+
+### Phase 3: Plugin Ecosystem (Next)
+**Goal:** Safely expose high-value plugin APIs (SmartConnections, Digital Garden, etc.)
 
 **Tasks:**
-- [ ] Implement `list_plugins()` - Discover installed plugins
-- [ ] Implement `get_plugin_info(plugin_id)` - Plugin metadata
-- [ ] Implement `dataview_query(query, context)` - Direct Dataview queries
-- [ ] Implement `search_vault(query)` - Full-text search
-- [ ] Add error handling improvements
-- [ ] Write unit tests (optional)
+- [ ] Research SmartConnections API surface (`app.plugins.plugins['smart-connections'].api`)
+- [ ] Research Digital Garden compile/publish helpers
+- [ ] Define safe method invocation schema + allowlist
+- [ ] Implement tool(s) for semantic search + publish preview
+- [ ] Add targeted error handling + logging for plugin calls
 
 **Success Criteria:**
-- AI can discover installed plugins
-- AI can execute Dataview queries without opening notes
-- AI can search vault by text
-- Errors handled gracefully
+- AI can call SmartConnections for embeddings/semantic matches
+- AI can preview Digital Garden publish payloads
+- Plugin method calls are audited + require opt-in approval for risky ops
 
-**Estimated Time:** 2-3 hours of implementation
+**Estimated Time:** 2-3 focused sessions
 
-### Phase 3: Plugin Ecosystem (Future)
+### Phase 4: Production Ready (Future)
 - SmartConnections integration (semantic search)
 - Digital Garden integration (preview publishing)
 - Safe plugin method calling
@@ -252,11 +252,12 @@ Result: Pixel-perfect match to Obsidian UI
 3. Troubleshoot any connection issues
 4. Help user explore real use cases
 
-### If Moving to Phase 2
-1. Review Phase 2 tasks in Direct-API-Architecture.md:641-657
-2. Start with `list_plugins()` implementation
-3. Add to both plugin (`main.ts`) and MCP server (`obsidian_mcp_server.py`)
-4. Test each tool as you build it
+### If Moving to Phase 3
+1. Review Phase 3 plan in `Direct-API-Architecture.md` (Plugin Ecosystem section)
+2. Inspect SmartConnections + Digital Garden plugin APIs via new `get_plugin_info`
+3. Design safe method whitelist + permission prompts before exposing mutating calls
+4. Implement new MCP tools (e.g., `smart_connections_search`, `digital_garden_preview`)
+5. Test using Claude/Codex with real vault scenarios
 
 ### If User Reports Issues
 1. Check Obsidian is running
@@ -268,7 +269,7 @@ Result: Pixel-perfect match to Obsidian UI
 ### If User Wants to Publish
 1. Review PUBLISHING-GUIDE.md
 2. Need 20+ GitHub stars for Community Plugins
-3. Recommend completing Phase 2 first for more value
+3. Recommend completing Phase 3 first for community-ready value
 4. Update LICENSE with user's actual name
 5. Create GitHub repo and push
 
@@ -326,26 +327,20 @@ Claude Config: C:\Users\sthat\AppData\Roaming\Claude\claude_desktop_config.json
 
 ## 🚦 Decision Points
 
-### Should User Test First or Continue to Phase 2?
-**Recommend:** Test with Claude Code first
-- Validates everything works end-to-end
-- User gets immediate value
-- Finds any issues before building more
-- Can do Phase 2 in next session
+### Focus on Real Workflows or Jump Into Phase 3?
+**Recommend:** Capture a handful of real prompts (now that Claude/Codex are working) and let that guide Phase 3 priorities. Don't wait too long—Phase 3 unlocks SmartConnections + Digital Garden which will amplify those workflows.
 
 ### Should User Make Repo Public?
-**Recommend:** After Phase 2
-- Phase 1 is functional but basic
-- Phase 2 adds more value
-- Better for community adoption
-- Need to update LICENSE with real name first
+**Recommend:** After Phase 3
+- Phase 2 proves the concept but plugin integrations will wow the community
+- Documentation already references future plugin access; better to deliver it first
+- Still need to update LICENSE author info before publishing
 
 ### Should User Add More Features?
-**Recommend:** Follow Phase 2 → 3 → 4 roadmap
-- Architecture is sound
-- Each phase builds on previous
-- Planned features cover real use cases
-- Don't over-engineer before user testing
+**Recommend:** Start Phase 3 planning/execution
+- SmartConnections + Digital Garden are the differentiators
+- Phase 2 foundation is stable (tests passed on both AI clients)
+- Next work mostly lives in new tools + permission UX, so begin scaffolding soon
 
 ---
 
@@ -358,12 +353,17 @@ Claude Config: C:\Users\sthat\AppData\Roaming\Claude\claude_desktop_config.json
 - [x] Connection test passes
 - [x] No console errors
 
-### Next Milestone: First Real Use
-- [ ] User restarts Claude Code
-- [ ] Test prompts work
-- [ ] User tries real workflows
-- [ ] User reports success or issues
-- [ ] Decision: Continue to Phase 2 or refine Phase 1
+### Phase 2 Success Criteria (All Met ✅)
+- [x] AI can list installed plugins + fetch manifests
+- [x] AI can query Dataview directly without opening notes
+- [x] AI can search vault filenames/paths quickly
+- [x] Claude + Codex both exercised new tools successfully
+
+### Next Milestone: Phase 3 (Plugin Ecosystem)
+- [ ] Document SmartConnections + Digital Garden APIs via `get_plugin_info`
+- [ ] Decide on safe method allowlist + approval UX
+- [ ] Implement semantic search + publish preview MCP tools
+- [ ] Add tests/docs for new capabilities
 
 ---
 
@@ -371,17 +371,16 @@ Claude Config: C:\Users\sthat\AppData\Roaming\Claude\claude_desktop_config.json
 
 ### What User Understands
 - ✅ Project goal and architecture
-- ✅ How MCP works
-- ✅ Plugin installed and running
-- ✅ Python server configured
-- ✅ Claude Code needs restart
-- ✅ Repository structure is correct for publishing
+- ✅ How MCP works end-to-end (Claude + Codex both tested)
+- ✅ Plugin + MCP server are running and authenticated
+- ✅ New discovery/search tools are live and ready for prompts
+- ✅ Documentation + repo layout
 
 ### What User May Need Help With
-- Using Claude Code with MCP tools (first time)
-- Interpreting any error messages
-- Deciding when to move to Phase 2
-- GitHub repo creation and publishing
+- Designing safe Phase 3 plugin integrations
+- Interpreting SmartConnections/Digital Garden APIs
+- Capturing/automating real workflows with the new tools
+- GitHub repo creation and publishing (once Phase 3 lands)
 
 ### What User is Excited About
 - Making this available to community
@@ -394,23 +393,22 @@ Claude Config: C:\Users\sthat\AppData\Roaming\Claude\claude_desktop_config.json
 ## 🔄 Next Session Checklist
 
 **For AI to ask user:**
-1. Did Claude Code restart work?
-2. Did the test prompts succeed?
-3. Any errors or issues?
-4. Want to try real use cases?
-5. Ready for Phase 2 or want to refine Phase 1?
+1. Any real workflows/prompts we should capture from the new tools?
+2. Which plugin integration should Phase 3 prioritize (SmartConnections vs Digital Garden)?
+3. Any guardrails/approval UX preferences before exposing plugin APIs?
+4. Any issues seen during Claude or Codex usage since the update?
 
 **For AI to check:**
 1. Is Obsidian running?
 2. Is plugin enabled?
-3. Any console errors?
-4. Is user satisfied with Phase 1?
+3. Any console errors during new tool calls?
+4. Do we have enough info about SmartConnections/Digital Garden APIs?
 
 **For AI to offer:**
 1. Help with troubleshooting
-2. Phase 2 implementation
-3. Publishing guidance
-4. Feature brainstorming
+2. Phase 3 implementation planning/execution
+3. Publishing guidance (once plugin integrations land)
+4. Feature brainstorming / workflow automation ideas
 
 ---
 
@@ -442,16 +440,14 @@ abc2296 - Add community publishing documentation and licenses
 - Complete documentation
 
 **Current State:**
-- Phase 1 complete and tested
-- Claude Code configured
-- User needs to restart and test
-- Ready for real-world use
+- Phase 1 + Phase 2 complete and validated in Claude + Codex
+- Obsidian MCP Bridge plugin + Python server running smoothly
+- New discovery/search tools ready for daily workflows
 
 **Next Steps:**
-- User tests with Claude Code
-- Collect feedback
-- Move to Phase 2 (add more tools)
-- Eventually publish to community
+- Capture real prompts + note desired SmartConnections/Digital Garden actions
+- Kick off Phase 3 implementation (plugin ecosystem tools + approvals)
+- Revisit docs/README once Phase 3 lands, then prep for public release
 
 ---
 

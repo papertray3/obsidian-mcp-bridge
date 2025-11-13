@@ -11,6 +11,11 @@ import asyncio
 import websockets
 from typing import Any, Optional
 
+try:
+    from websockets.protocol import State as WebSocketState
+except ImportError:
+    WebSocketState = None
+
 # Import MCP SDK
 try:
     from mcp.server import Server
@@ -62,11 +67,28 @@ async def connect_to_plugin():
         sys.exit(1)
 
 
+def _is_ws_closed() -> bool:
+    """Robustly detect if the websocket connection is closed across websockets versions."""
+    if not ws_connection:
+        return True
+
+    closed_attr = getattr(ws_connection, "closed", None)
+    if isinstance(closed_attr, bool):
+        return closed_attr
+
+    state = getattr(ws_connection, "state", None)
+    if WebSocketState is not None and state is not None:
+        try:
+            return state == WebSocketState.CLOSED
+        except Exception:
+            pass
+
+    return False
+
+
 async def ensure_connection():
     """Ensure WebSocket connection is alive"""
-    global ws_connection
-
-    if not ws_connection or ws_connection.closed:
+    if _is_ws_closed():
         await connect_to_plugin()
 
 
@@ -153,6 +175,64 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="list_plugins",
+            description="List installed Obsidian plugins and their status",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+        Tool(
+            name="get_plugin_info",
+            description="Get details about a specific plugin, including manifest and available API methods",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "plugin_id": {
+                        "type": "string",
+                        "description": "Plugin identifier (e.g., dataview)"
+                    }
+                },
+                "required": ["plugin_id"]
+            }
+        ),
+        Tool(
+            name="dataview_query",
+            description="Execute a Dataview query and return rendered markdown output",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Dataview query text"
+                    },
+                    "context_path": {
+                        "type": "string",
+                        "description": "Optional path to use as query context"
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
+        Tool(
+            name="search_vault",
+            description="Search markdown filenames/paths for a query string",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search term"
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Optional folder to scope search within"
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
+        Tool(
             name="ping",
             description="Check if connection to Obsidian plugin is working",
             inputSchema={
@@ -179,6 +259,39 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name == "list_vault_files":
             folder = arguments.get("folder", "")
             result = await call_plugin("list_vault_files", {"folder": folder})
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "list_plugins":
+            result = await call_plugin("list_plugins", {})
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "get_plugin_info":
+            plugin_id = arguments.get("plugin_id") or arguments.get("pluginId")
+            if not plugin_id:
+                raise ValueError("get_plugin_info requires plugin_id")
+            result = await call_plugin("get_plugin_info", {"pluginId": plugin_id})
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "dataview_query":
+            query = arguments.get("query")
+            if not query:
+                raise ValueError("dataview_query requires query text")
+            context_path = arguments.get("context_path") or arguments.get("contextPath") or ""
+            result = await call_plugin("dataview_query", {
+                "query": query,
+                "context": context_path
+            })
+            return [TextContent(type="text", text=result)]
+
+        elif name == "search_vault":
+            query = arguments.get("query")
+            if not query:
+                raise ValueError("search_vault requires query text")
+            folder = arguments.get("folder") or ""
+            result = await call_plugin("search_vault", {
+                "query": query,
+                "folder": folder
+            })
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == "ping":

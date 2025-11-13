@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `list_plugins()` tool exposes installed plugins (enabled + disabled) with manifest metadata
+- `get_plugin_info()` returns manifest, API method names, and registered hotkeys for a plugin
+- `dataview_query()` executes Dataview queries directly and returns rendered markdown
+- `search_vault()` performs filename/path searches with parent folder + tag context
+- Updated MCP server + docs to describe the new discovery/search workflow
+
+### Planned - Phase 3
+- SmartConnections integration
+- Digital Garden integration
+- Safe plugin method calling
+
+### Planned - Phase 4
+- Permission system (tiered operations)
+- User approval modals
+- Rate limiting
+- Community plugin distribution
+
 ## [0.1.0] - 2025-01-11
 
 ### Added
@@ -24,22 +44,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Built custom WebSocket implementation to work in Obsidian's Electron environment
 - Uses only Node.js built-in modules (http, crypto) for compatibility
 - Localhost-only by default, with future remote access capability
-
-## [Unreleased]
-
-### Planned - Phase 2
-- `list_plugins()` - Discover installed plugins
-- `get_plugin_info()` - Plugin metadata and capabilities
-- `dataview_query()` - Execute Dataview queries directly
-- `search_vault()` - Text search across vault
-
-### Planned - Phase 3
-- SmartConnections integration
-- Digital Garden integration
-- Safe plugin method calling
-
-### Planned - Phase 4
-- Permission system (tiered operations)
-- User approval modals
-- Rate limiting
-- Community plugin distribution

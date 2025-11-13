@@ -243,7 +243,7 @@ Based on my Garden Dashboard, what should I work on today?
 ### Content Audit
 ```
 Which of my public notes haven't been updated in over a month?
-(Note: Will work better when we add dataview_query tool in Phase 2)
+(Tip: use the new `dataview_query` tool if you just need the table output)
 ```
 
 ### Research Helper
@@ -253,13 +253,12 @@ I'm writing about X, find all my notes that might be relevant
 
 ---
 
-## ⏭️ What's Coming Next (Phase 2)
+## ⏭️ What's Coming Next (Phase 3)
 
 We're planning to add:
-- `list_plugins()` - Discover what Obsidian plugins you have
-- `get_plugin_info()` - Learn about plugin capabilities
-- `dataview_query()` - Execute Dataview queries directly without opening notes
-- `search_vault()` - Full-text search across your vault
+- SmartConnections-powered semantic search + similarity lookups
+- Digital Garden preview endpoints so AI can show publish-ready output
+- Safe plugin method calls with guardrails/approval prompts
 
 ---
 
