@@ -13,9 +13,16 @@ export async function renderNote(plugin: MCPBridgePlugin, filepath: string): Pro
 		throw new Error(`Not a file: ${filepath}`);
 	}
 
-	// Open in background leaf (not visible to user)
+	// Open in background leaf (not visible to user) and force preview mode
 	const leaf = plugin.app.workspace.getLeaf(false);
-	await leaf.openFile(file);
+	await leaf.setViewState({
+		type: 'markdown',
+		state: {
+			file: filepath,
+			mode: 'preview'
+		},
+		active: false
+	});
 
 	// Wait for plugins to render (Dataview, etc.)
 	// Based on Digital Garden's approach: wait up to 2 seconds for Dataview
@@ -28,7 +35,11 @@ export async function renderNote(plugin: MCPBridgePlugin, filepath: string): Pro
 		throw new Error('Failed to open markdown view');
 	}
 
-	const html = view.contentEl.innerHTML;
+	const previewEl =
+		view.previewMode?.containerEl ??
+		(view.contentEl.querySelector('.markdown-reading-view') as HTMLElement | null) ??
+		view.contentEl;
+	const html = previewEl.innerHTML;
 
 	// Cleanup - detach the leaf
 	leaf.detach();
@@ -47,7 +58,10 @@ async function waitForRender(leaf: any, maxWaitMs: number): Promise<void> {
 	while (Date.now() - startTime < maxWaitMs) {
 		const view = leaf.view;
 		if (view instanceof MarkdownView) {
-			const contentEl = view.contentEl;
+			const contentEl =
+				view.previewMode?.containerEl ??
+				(view.contentEl.querySelector('.markdown-reading-view') as HTMLElement | null) ??
+				view.contentEl;
 
 			// Check if Dataview has rendered (look for data-tag-name attribute)
 			const dataviewElements = contentEl.querySelectorAll('[data-tag-name]');

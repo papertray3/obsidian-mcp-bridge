@@ -19,6 +19,13 @@ export interface MCPBridgeSettings {
 
 	// Remote access control (future)
 	allowedOrigins: string[];
+
+	// Digital Garden integration
+	digitalGardenRepoPath: string;
+
+	// Cache settings
+	cacheDirPath: string;
+	cacheMaxSizeMB: number;
 }
 
 export const DEFAULT_SETTINGS: MCPBridgeSettings = {
@@ -31,6 +38,9 @@ export const DEFAULT_SETTINGS: MCPBridgeSettings = {
 	certPath: '',
 	keyPath: '',
 	allowedOrigins: [],
+	digitalGardenRepoPath: '',
+	cacheDirPath: '.obsidian/cache/mcp-bridge-render',
+	cacheMaxSizeMB: 100,
 };
 
 export class MCPBridgeSettingsTab extends PluginSettingTab {
@@ -179,6 +189,53 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}));
 		}
+
+		// === Cache Settings ===
+		containerEl.createEl('h3', { text: 'Cache Settings' });
+
+		new Setting(containerEl)
+			.setName('Cache Directory')
+			.setDesc('Directory for storing compiled note cache (relative to vault root)')
+			.addText(text => text
+				.setPlaceholder('.obsidian/cache/mcp-bridge-render')
+				.setValue(this.plugin.settings.cacheDirPath)
+				.onChange(async (value) => {
+					this.plugin.settings.cacheDirPath = value || '.obsidian/cache/mcp-bridge-render';
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Cache Size Limit')
+			.setDesc('Maximum cache size in MB (older entries evicted when limit reached)')
+			.addText(text => text
+				.setPlaceholder('100')
+				.setValue(String(this.plugin.settings.cacheMaxSizeMB))
+				.onChange(async (value) => {
+					this.plugin.settings.cacheMaxSizeMB = parseInt(value) || 100;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Clear Cache')
+			.setDesc('Delete all cached compiled notes')
+			.addButton(button => button
+				.setButtonText('Clear Cache')
+				.setWarning()
+				.onClick(async () => {
+					await this.plugin.clearCache();
+					console.log('Cache cleared');
+				}));
+
+		// Cache stats
+		const cacheStats = this.plugin.getCacheStats();
+		const statsDiv = containerEl.createDiv();
+		statsDiv.innerHTML = `
+			<p><strong>Cache Statistics:</strong></p>
+			<ul>
+				<li>Entries: ${cacheStats.entries}</li>
+				<li>Total Size: ${cacheStats.totalSizeMB.toFixed(2)} MB / ${cacheStats.maxSizeMB} MB</li>
+			</ul>
+		`;
 
 		// === Help Text ===
 		containerEl.createEl('h3', { text: 'Quick Setup Guide' });

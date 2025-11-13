@@ -1,12 +1,16 @@
 import { Plugin, Notice, TFile, PluginManifest, Command, Hotkey } from 'obsidian';
 import { randomUUID } from 'crypto';
+import * as path from 'path';
 import { MCPBridgeSettings, DEFAULT_SETTINGS, MCPBridgeSettingsTab } from './settings';
 import { MCPWebSocketServer, MCPRequest } from './websocket-server';
 import { renderNote, getRawNote } from './handlers/render-note';
+import { renderNoteDGCompiled } from './handlers/dg-compiled-render';
+import { RenderedContentCacheManager, CacheSettings } from './cache-manager';
 
 export default class MCPBridgePlugin extends Plugin {
 	settings: MCPBridgeSettings;
 	server: MCPWebSocketServer;
+	cacheManager: RenderedContentCacheManager;
 
 	async onload() {
 		await this.loadSettings();
@@ -21,6 +25,16 @@ export default class MCPBridgePlugin extends Plugin {
 				10000
 			);
 		}
+
+		// Initialize cache manager
+		const cacheSettings: CacheSettings = {
+			cacheDir: path.join(
+				(this.app.vault.adapter as any).basePath,
+				this.settings.cacheDirPath
+			),
+			maxSizeMB: this.settings.cacheMaxSizeMB
+		};
+		this.cacheManager = new RenderedContentCacheManager(this.app.vault, cacheSettings);
 
 		// Initialize WebSocket server
 		this.server = new MCPWebSocketServer(this);
@@ -98,6 +112,9 @@ export default class MCPBridgePlugin extends Plugin {
 
 			case 'get_note_raw':
 				return await getRawNote(this, params.filepath);
+
+			case 'render_note_dg_compiled':
+				return await renderNoteDGCompiled(this, params.filepath);
 
 			case 'list_vault_files':
 				return await this.listVaultFiles(params.folder);
@@ -275,6 +292,28 @@ export default class MCPBridgePlugin extends Plugin {
 			const modifiers = hotkey.modifiers?.length ? `${hotkey.modifiers.join('+')}+` : '';
 			return `${modifiers}${hotkey.key}`;
 		});
+	}
+
+	/**
+	 * Get the cache manager instance
+	 */
+	getCacheManager(): RenderedContentCacheManager {
+		return this.cacheManager;
+	}
+
+	/**
+	 * Clear the entire cache
+	 */
+	async clearCache(): Promise<void> {
+		await this.cacheManager.clear();
+		new Notice('MCP Bridge: Cache cleared');
+	}
+
+	/**
+	 * Get cache statistics
+	 */
+	getCacheStats(): { entries: number; totalSizeMB: number; maxSizeMB: number } {
+		return this.cacheManager.getStats();
 	}
 }
 

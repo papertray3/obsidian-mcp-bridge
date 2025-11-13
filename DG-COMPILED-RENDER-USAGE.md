@@ -1,0 +1,257 @@
+# Using render_note_dg_compiled
+
+## Overview
+The `render_note_dg_compiled` MCP tool leverages the Digital Garden plugin's compiler to render notes with full Dataview execution and caching. This solves two key problems:
+1. **Size limits:** Returns cached file path instead of full HTML content
+2. **Performance:** Caches rendered output for fast repeated access
+
+## Prerequisites
+- Digital Garden plugin must be installed and enabled
+- Obsidian MCP Bridge plugin running
+- MCP server configured in your AI client
+
+## Important: dg-publish Not Required
+
+**This tool compiles ANY file you request, regardless of `dg-publish` frontmatter.**
+
+Unlike Digital Garden's normal publishing workflow, `render_note_dg_compiled` bypasses the publish filtering and directly calls the compiler. This means:
+
+- ✅ You can render notes with `dg-publish: false`
+- ✅ You can preview drafts before marking them for publish
+- ✅ You can render private notes that shouldn't go to your public garden
+- ✅ The `dg-publish` flag only matters for actual GitHub publishing, not rendering
+
+**Why?** The MCP bridge is for **reading/previewing** your vault, not publishing it. You should be able to render any note for local use.
+
+## Basic Usage
+
+### Via Claude Code
+
+```
+Use the render_note_dg_compiled tool to render "Notes/Dashboards/🔎Garden Dashboard.md"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "cachePath": "C:/Users/you/vault/.obsidian/cache/mcp-bridge-render/abc123.../note.html",
+  "length": 25432,
+  "hash": "abc123...",
+  "lastModified": 1736605234000,
+  "cacheHit": false
+}
+```
+
+### Reading the Cached File
+
+Once you have the `cachePath`, read the file directly:
+
+```
+Read the file at the cachePath returned
+```
+
+This gives you the full rendered HTML with all Dataview queries executed.
+
+## When to Use
+
+### Use `render_note_dg_compiled` when:
+- ✅ Note contains Dataview queries that need execution
+- ✅ Note is large (>10KB) and may exceed MCP limits
+- ✅ You need Digital Garden's exact compilation output
+- ✅ You'll access the same note multiple times (caching benefit)
+- ✅ You want the same output that would be published
+
+### Use `render_note` when:
+- ✅ You need quick inline HTML without setup
+- ✅ Note is small (<10KB)
+- ✅ Digital Garden plugin not available
+- ✅ You don't need exact DG compilation
+
+### Use `get_note_raw` when:
+- ✅ You only need the raw markdown
+- ✅ You'll process the content yourself
+- ✅ You don't need Dataview execution
+
+## Cache Behavior
+
+### Cache Key
+Cache key is based on: `hash(filepath + mtime + size)`
+
+**Cache invalidates automatically when:**
+- File content changes (mtime updates)
+- File size changes
+
+**Cache does NOT invalidate when:**
+- Only viewing the file
+- Opening/closing the file
+
+### Cache Management
+
+**View cache stats:**
+1. Open Obsidian Settings
+2. Go to MCP Bridge plugin settings
+3. Scroll to "Cache Settings" section
+4. View statistics: entries count, total size, limit
+
+**Clear cache manually:**
+1. Open MCP Bridge plugin settings
+2. Click "Clear Cache" button in Cache Settings
+3. All cached files deleted
+
+**Adjust cache size:**
+1. Open MCP Bridge plugin settings
+2. Update "Cache Size Limit" (default: 100 MB)
+3. Save settings
+4. LRU eviction happens automatically when limit reached
+
+## Configuration
+
+### Cache Directory
+**Default:** `.obsidian/cache/mcp-bridge-render`
+
+**To change:**
+1. Open MCP Bridge plugin settings
+2. Update "Cache Directory" field
+3. Use path relative to vault root
+4. Restart plugin to apply
+
+### Cache Size Limit
+**Default:** 100 MB
+
+**To change:**
+1. Open MCP Bridge plugin settings
+2. Update "Cache Size Limit" field
+3. Enter size in MB
+4. Changes apply immediately
+
+## Error Handling
+
+### Digital Garden Not Available
+**Error:**
+```json
+{
+  "success": false,
+  "error": "DigitalGardenNotAvailable",
+  "message": "Digital Garden plugin is not installed or not enabled..."
+}
+```
+
+**Solution:**
+1. Install Digital Garden plugin from Community Plugins
+2. Enable it in Settings → Community Plugins
+3. Configure Digital Garden settings (repo, etc.)
+
+### File Not Found
+**Error:**
+```json
+{
+  "success": false,
+  "error": "FileNotFound",
+  "message": "File not found: path/to/note.md"
+}
+```
+
+**Solution:**
+- Check filepath is correct (relative to vault root)
+- Verify file exists in vault
+- Use `list_vault_files` to find correct path
+
+### Compilation Error
+**Error:**
+```json
+{
+  "success": false,
+  "error": "CompilationError",
+  "message": "Failed to compile file: ..."
+}
+```
+
+**Solution:**
+- Check note has valid markdown syntax
+- Check Dataview queries are valid
+- Review Digital Garden plugin logs
+- Try rendering the note manually in DG
+
+## Advanced Usage
+
+### Cache Warming
+Pre-render frequently accessed notes:
+
+```
+For each dashboard note, call render_note_dg_compiled to warm the cache
+```
+
+### Monitoring Cache Performance
+```
+Get cache stats from MCP Bridge settings
+- If cache hit rate is low, consider increasing size limit
+- If cache size is maxed out, consider clearing old entries
+```
+
+### Integration with Workflows
+```
+1. Call render_note_dg_compiled on note
+2. Parse the response to get cachePath
+3. Read cached file for full HTML
+4. Process HTML (extract tables, links, etc.)
+5. Repeat step 3 for fast access (cache hit)
+```
+
+## Performance Tips
+
+1. **Batch operations:** Render multiple notes, then read cached files
+2. **Cache warming:** Pre-render frequently used dashboards
+3. **Size management:** Adjust cache limit based on vault size
+4. **Selective caching:** Only use for notes that benefit from caching
+
+## Comparison Table
+
+| Feature | render_note | render_note_dg_compiled | get_note_raw |
+|---------|-------------|-------------------------|--------------|
+| Dataview execution | ✅ Yes | ✅ Yes | ❌ No |
+| Caching | ❌ No | ✅ Yes | ❌ No |
+| Size limit | 10KB MCP limit | No limit (returns path) | 10KB MCP limit |
+| DG compilation | ❌ No | ✅ Yes | ❌ No |
+| First call speed | 2-3 sec | 2-3 sec | <100ms |
+| Cached call speed | N/A | <50ms | N/A |
+| Requires DG plugin | ❌ No | ✅ Yes | ❌ No |
+
+## Examples
+
+### Example 1: Render Dashboard
+```
+Render Notes/Dashboards/🔎Garden Dashboard.md using DG compiled render
+```
+
+**Output:** Cache metadata with path
+
+```
+Read the HTML from the cached file
+```
+
+**Output:** Full HTML with executed Dataview
+
+### Example 2: Monitor Cache
+```
+What are the current cache statistics?
+```
+
+Check MCP Bridge settings → Cache Settings section
+
+### Example 3: Clear Cache
+```
+The cache is getting too large, please clear it
+```
+
+Open MCP Bridge settings → Click "Clear Cache" button
+
+## Troubleshooting
+
+See TEST-DG-COMPILED-RENDER.md for detailed troubleshooting guide.
+
+## Related Documentation
+- `DG-Compiled-Render-Plan.md` - Implementation plan
+- `TEST-DG-COMPILED-RENDER.md` - Testing guide
+- `README.md` - Main documentation
+- Digital Garden plugin documentation

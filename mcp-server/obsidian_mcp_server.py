@@ -233,6 +233,20 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="render_note_dg_compiled",
+            description="Render a note using Digital Garden's compiler with caching. Returns metadata about cached file (path, hash, size) instead of full HTML content. Use this for large notes that exceed MCP size limits. Requires Digital Garden plugin to be installed and enabled.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Path to the note file (relative to vault root)"
+                    }
+                },
+                "required": ["filepath"]
+            }
+        ),
+        Tool(
             name="ping",
             description="Check if connection to Obsidian plugin is working",
             inputSchema={
@@ -292,6 +306,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 "query": query,
                 "folder": folder
             })
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "render_note_dg_compiled":
+            filepath = arguments.get("filepath")
+            if not filepath:
+                raise ValueError("render_note_dg_compiled requires filepath")
+            result = await call_plugin("render_note_dg_compiled", {"filepath": filepath})
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == "ping":

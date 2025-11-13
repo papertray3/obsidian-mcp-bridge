@@ -1,0 +1,212 @@
+import { TFile, Vault } from 'obsidian';
+import { createHash } from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+
+export interface CacheEntry {
+	hash: string;
+	filepath: string;
+	mtime: number;
+	size: number;
+	lastAccess: number;
+	cachedSize: number;
+}
+
+export interface CacheMetadata {
+	entries: Record<string, CacheEntry>;
+	totalSize: number;
+}
+
+export interface CacheSettings {
+	cacheDir: string;
+	maxSizeMB: number;
+}
+
+export class RenderedContentCacheManager {
+	private vault: Vault;
+	private settings: CacheSettings;
+	private metadata: CacheMetadata;
+	private metadataPath: string;
+
+	constructor(vault: Vault, settings: CacheSettings) {
+		this.vault = vault;
+		this.settings = settings;
+		this.metadataPath = path.join(settings.cacheDir, 'metadata.json');
+		this.metadata = this.loadMetadata();
+	}
+
+	/**
+	 * Generate cache key from file metadata
+	 */
+	private generateCacheKey(file: TFile): string {
+		const input = `${file.path}|${file.stat.mtime}|${file.stat.size}`;
+		return createHash('sha256').update(input).digest('hex');
+	}
+
+	/**
+	 * Get cached content if valid, otherwise return null
+	 */
+	async get(file: TFile): Promise<{ content: string; cachePath: string } | null> {
+		const hash = this.generateCacheKey(file);
+		const entry = this.metadata.entries[hash];
+
+		if (!entry) {
+			return null;
+		}
+
+		// Verify cache file exists
+		const cachePath = path.join(this.settings.cacheDir, hash, 'note.html');
+		if (!fs.existsSync(cachePath)) {
+			// Cache entry exists but file is missing - clean up
+			delete this.metadata.entries[hash];
+			await this.saveMetadata();
+			return null;
+		}
+
+		// Update last access time
+		entry.lastAccess = Date.now();
+		await this.saveMetadata();
+
+		// Read cached content
+		const content = fs.readFileSync(cachePath, 'utf-8');
+
+		return { content, cachePath };
+	}
+
+	/**
+	 * Store compiled content in cache
+	 */
+	async set(file: TFile, content: string): Promise<string> {
+		const hash = this.generateCacheKey(file);
+		const cacheDir = path.join(this.settings.cacheDir, hash);
+		const cachePath = path.join(cacheDir, 'note.html');
+
+		// Create cache directory
+		if (!fs.existsSync(cacheDir)) {
+			fs.mkdirSync(cacheDir, { recursive: true });
+		}
+
+		// Write content
+		fs.writeFileSync(cachePath, content, 'utf-8');
+
+		// Get file size
+		const stats = fs.statSync(cachePath);
+		const cachedSize = stats.size;
+
+		// Update metadata
+		const entry: CacheEntry = {
+			hash,
+			filepath: file.path,
+			mtime: file.stat.mtime,
+			size: file.stat.size,
+			lastAccess: Date.now(),
+			cachedSize
+		};
+
+		this.metadata.entries[hash] = entry;
+		this.metadata.totalSize += cachedSize;
+		await this.saveMetadata();
+
+		// Enforce size limit
+		await this.enforceSizeLimit();
+
+		return cachePath;
+	}
+
+	/**
+	 * Enforce cache size limit using LRU eviction
+	 */
+	private async enforceSizeLimit(): Promise<void> {
+		const maxSizeBytes = this.settings.maxSizeMB * 1024 * 1024;
+
+		while (this.metadata.totalSize > maxSizeBytes) {
+			// Find oldest entry by lastAccess
+			let oldestEntry: CacheEntry | null = null;
+			let oldestHash: string | null = null;
+
+			for (const [hash, entry] of Object.entries(this.metadata.entries)) {
+				if (!oldestEntry || entry.lastAccess < oldestEntry.lastAccess) {
+					oldestEntry = entry;
+					oldestHash = hash;
+				}
+			}
+
+			if (!oldestHash || !oldestEntry) {
+				break;
+			}
+
+			// Delete cached file
+			const cacheDir = path.join(this.settings.cacheDir, oldestHash);
+			if (fs.existsSync(cacheDir)) {
+				fs.rmSync(cacheDir, { recursive: true });
+			}
+
+			// Update metadata
+			this.metadata.totalSize -= oldestEntry.cachedSize;
+			delete this.metadata.entries[oldestHash];
+		}
+
+		await this.saveMetadata();
+	}
+
+	/**
+	 * Load metadata from disk
+	 */
+	private loadMetadata(): CacheMetadata {
+		if (!fs.existsSync(this.metadataPath)) {
+			return { entries: {}, totalSize: 0 };
+		}
+
+		try {
+			const data = fs.readFileSync(this.metadataPath, 'utf-8');
+			return JSON.parse(data);
+		} catch (error) {
+			console.error('Failed to load cache metadata:', error);
+			return { entries: {}, totalSize: 0 };
+		}
+	}
+
+	/**
+	 * Save metadata to disk
+	 */
+	private async saveMetadata(): Promise<void> {
+		// Ensure cache directory exists
+		const cacheDir = path.dirname(this.metadataPath);
+		if (!fs.existsSync(cacheDir)) {
+			fs.mkdirSync(cacheDir, { recursive: true });
+		}
+
+		try {
+			fs.writeFileSync(
+				this.metadataPath,
+				JSON.stringify(this.metadata, null, 2),
+				'utf-8'
+			);
+		} catch (error) {
+			console.error('Failed to save cache metadata:', error);
+		}
+	}
+
+	/**
+	 * Clear entire cache
+	 */
+	async clear(): Promise<void> {
+		if (fs.existsSync(this.settings.cacheDir)) {
+			fs.rmSync(this.settings.cacheDir, { recursive: true });
+		}
+
+		this.metadata = { entries: {}, totalSize: 0 };
+		await this.saveMetadata();
+	}
+
+	/**
+	 * Get cache statistics
+	 */
+	getStats(): { entries: number; totalSizeMB: number; maxSizeMB: number } {
+		return {
+			entries: Object.keys(this.metadata.entries).length,
+			totalSizeMB: this.metadata.totalSize / (1024 * 1024),
+			maxSizeMB: this.settings.maxSizeMB
+		};
+	}
+}
