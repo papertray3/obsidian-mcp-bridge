@@ -5,9 +5,10 @@
 ## Overview
 
 This project enables AI assistants (Claude Code, Codex, etc.) to access your Obsidian vault with full fidelity:
-- ✅ Rendered content (Dataview queries executed, not empty divs)
+- ✅ Extensible tool system (add custom tools without plugin code changes)
+- ✅ YAML-driven schema (single source of truth)
+- ✅ User-scriptable handlers (JavaScript/TypeScript)
 - ✅ Plugin output (Metadata Menu, Digital Garden, SmartConnections, etc.)
-- ✅ Semantic search capabilities
 - ✅ Direct API access (no code duplication)
 - ✅ Future-proof (automatic updates when plugins change)
 
@@ -15,11 +16,19 @@ This project enables AI assistants (Claude Code, Codex, etc.) to access your Obs
 
 ```
 AI Client → MCP Server (Python) → WebSocket → Obsidian Plugin → Obsidian APIs
+                                                      ↓
+                                              YAML Tool Registry
+                                                      ↓
+                                            User Handler Scripts
 ```
 
 **Two components:**
 1. **Obsidian Plugin** (`plugin/`) - Runs inside Obsidian, exposes APIs via WebSocket
 2. **MCP Server** (`mcp-server/`) - Translates MCP protocol to WebSocket requests
+
+**Key Innovation:** Tools are defined in a YAML file and implemented as user scripts, making the system fully extensible without requiring plugin modifications.
+
+📖 **[Read the Extensibility Guide](plugin/EXTENSIBILITY.md)** for complete architecture documentation.
 
 ## Quick Start
 
@@ -98,31 +107,67 @@ env = { OBSIDIAN_MCP_KEY = "your-api-key-from-plugin-settings" }
 
 ## Features
 
-### Phase 1 (Complete) - Proof of Concept
+### Phase 1 (Complete) - Minimal WebSocket Server
 - [x] Basic plugin scaffold
-- [x] WebSocket server
-- [x] `render_note()` - Get fully-rendered HTML
+- [x] WebSocket server with authentication
+- [x] Broadcast capability for real-time events
 - [x] API key authentication
 - [x] Python MCP server
 
-### Phase 2 (Current) - Core Tools
-- [x] `list_plugins()` - Discover installed plugins
-- [x] `get_plugin_info()` - Plugin metadata and capabilities
-- [x] `dataview_query()` - Execute Dataview queries
-- [x] `search_vault()` - Simple filename/path search
-- [x] `list_vault_files()` - File listing
+### Phase 2 (Current) - Extensible Tool Registry
+- [ ] YAML-driven tool registry (single source of truth)
+- [ ] User-scriptable handlers (add tools without plugin code changes)
+- [ ] Built-in core tools (file search, note reading, etc.)
+- [ ] Hot-reload support (changes detected automatically)
+- [ ] Sandboxed execution for user scripts
 
-### Phase 3 (Planned) - Plugin Ecosystem
+**📖 See [EXTENSIBILITY.md](plugin/EXTENSIBILITY.md) for complete architecture documentation**
+
+### Phase 3 (Planned) - Auto-Generation
+- [ ] Metadata Menu class integration
+- [ ] Auto-generate tools from class definitions
+- [ ] Template-based note creation
+- [ ] Frontmatter schema enforcement
+
+### Phase 4 (Planned) - Plugin Ecosystem
 - [ ] SmartConnections integration (semantic search)
 - [ ] Digital Garden integration (preview publishing)
-- [ ] Safe plugin method calling
+- [ ] Plugin API for tool registration
+- [ ] Community tool marketplace
 
-### Phase 4 (Planned) - Production Ready
-- [ ] Permission system (tiered operations)
-- [ ] User approval modals
-- [ ] Rate limiting
-- [ ] Documentation
-- [ ] Community plugin distribution
+## Extensibility
+
+The MCP Bridge uses a **YAML-based tool registry** that allows users to add custom functionality without modifying the plugin code.
+
+### Example: Adding a Custom Tool
+
+**1. Create a handler script:**
+```javascript
+// .obsidian/plugins/mcp-bridge/handlers/user/my_tool.js
+module.exports = {
+  async execute(params, context) {
+    const { vault } = context;
+    const files = vault.getMarkdownFiles();
+    return { totalFiles: files.length };
+  }
+};
+```
+
+**2. Add to tools.yaml:**
+```yaml
+tools:
+  user:
+    - name: count_notes
+      description: Count total notes in vault
+      handler: user/my_tool.js
+      inputSchema:
+        type: object
+        properties: {}
+```
+
+**3. Plugin auto-reloads** - Tool is immediately available to AI assistants!
+
+📖 **[Complete Extensibility Guide](plugin/EXTENSIBILITY.md)** with examples and best practices.
 
 ## Configuration
 
@@ -130,7 +175,7 @@ env = { OBSIDIAN_MCP_KEY = "your-api-key-from-plugin-settings" }
 - **Host:** `127.0.0.1` (localhost only by default)
 - **Port:** `27125`
 - **API Key:** Auto-generated (copy to MCP server config)
-- **Enable Remote:** `false` (future capability)
+- **Require Auth:** `true` (API key required for all connections)
 
 ### MCP Server Environment Variables
 ```bash
@@ -171,26 +216,31 @@ pytest
 - WebSocket binds to `127.0.0.1` only
 - API key authentication
 - No SSL needed (local traffic)
+- User scripts run in sandbox (no fs, http, or process access)
 
-### Future (Remote Access)
-- SSL/TLS certificates required
-- Origin validation
-- Configurable allowed origins
-- Rate limiting
+### Sandboxing
+User handler scripts have access to:
+- ✅ Obsidian API (`app`, `vault`, `workspace`)
+- ✅ Plugin APIs (Dataview, Metadata Menu, etc.)
+- ❌ Node.js file system (`fs`, `path`)
+- ❌ Network requests (`http`, `https`, `fetch`)
+- ❌ Process spawning (`child_process`)
+
+See [EXTENSIBILITY.md - Security](plugin/EXTENSIBILITY.md#security--sandboxing) for details.
 
 ## Documentation
 
-- **[Setup Guide](docs/setup.md)** - Detailed installation instructions
+- **[Extensibility Guide](plugin/EXTENSIBILITY.md)** - How to add custom tools
 - **[Architecture](../_Admin/Chats/Obsidian-REST-API/Direct-API-Architecture.md)** - Full technical design
 - **[API Reference](docs/api.md)** - Tool and method documentation
 
 ## Project Status
 
-**Current Phase:** Phase 2 - Core Tools (discovery/search tools shipped)
-**Last Updated:** 2025-01-11
+**Current Phase:** Phase 2 - Extensible Tool Registry (architecture designed, implementation starting)
+**Last Updated:** 2025-01-21
 **Status:** Active Development
 
-See [Direct-API-Architecture.md](../_Admin/Chats/Obsidian-REST-API/Direct-API-Architecture.md) for complete implementation plan.
+See [EXTENSIBILITY.md](plugin/EXTENSIBILITY.md) for implementation roadmap.
 
 ## Related Projects
 

@@ -1,9 +1,9 @@
 {
   "id": "obsidian-mcp-bridge",
-  "name": "MCP Bridge (Minimal)",
-  "version": "2.0.0-minimal",
+  "name": "MCP Bridge",
+  "version": "2.0.0",
   "minAppVersion": "1.4.0",
-  "description": "Minimal WebSocket server for Model Context Protocol integration. Clean starting point for dynamic tool registry.",
+  "description": "Extensible WebSocket server for Model Context Protocol integration. Add custom tools via YAML and JavaScript handlers.",
   "author": "papertray3",
   "authorUrl": "https://github.com/papertray3/obsidian-mcp-bridge",
   "isDesktopOnly": true

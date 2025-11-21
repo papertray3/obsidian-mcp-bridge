@@ -1,0 +1,99 @@
+version: "2.0"
+
+config:
+  auto_reload: true                  # Watch for file changes
+  sandbox_user_scripts: true         # Run user scripts in sandbox
+  enable_auto_generation: false      # Phase III: auto-gen from classes
+
+tools:
+  # Built-in tools (part of plugin core)
+  builtin:
+    - name: ping
+      description: Test connectivity to the MCP Bridge
+      handler: builtin
+      inputSchema:
+        type: object
+        properties: {}
+      outputSchema:
+        type: object
+        properties:
+          status:
+            type: string
+          timestamp:
+            type: number
+          version:
+            type: string
+
+    - name: search_files
+      description: Search for files in the vault using glob patterns
+      handler: builtin
+      category: search
+      inputSchema:
+        type: object
+        properties:
+          pattern:
+            type: string
+            description: Glob pattern to match (e.g., "*.md", "Notes/**/*.md")
+        required: [pattern]
+      outputSchema:
+        type: object
+        properties:
+          files:
+            type: array
+            items:
+              type: string
+
+    - name: get_note_raw
+      description: Get raw markdown content of a note
+      handler: builtin
+      category: notes
+      inputSchema:
+        type: object
+        properties:
+          filepath:
+            type: string
+            description: Path to note relative to vault root
+        required: [filepath]
+      outputSchema:
+        type: object
+        properties:
+          filepath:
+            type: string
+          content:
+            type: string
+
+    - name: list_vault_files
+      description: List all markdown files in the vault or a specific folder
+      handler: builtin
+      category: notes
+      inputSchema:
+        type: object
+        properties:
+          folder:
+            type: string
+            description: Optional folder to list files from (relative to vault root)
+      outputSchema:
+        type: object
+        properties:
+          files:
+            type: array
+            items:
+              type: object
+
+  # User-added custom tools
+  user:
+    # Example (uncomment to enable):
+    # - name: my_custom_tool
+    #   description: A custom tool I created
+    #   handler: user/my_tool.js
+    #   category: custom
+    #   inputSchema:
+    #     type: object
+    #     properties:
+    #       param1:
+    #         type: string
+    #         description: Description of parameter
+    #     required: [param1]
+
+  # Auto-generated tools (Phase III)
+  auto: []
