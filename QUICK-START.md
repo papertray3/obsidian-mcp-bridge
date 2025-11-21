@@ -80,9 +80,15 @@ echo $env:OBSIDIAN_MCP_KEY
 ### 4. Run Connection Test
 
 ```bash
-cd C:\Users\sthat\Source\Repos\obsidian-mcp-bridge
+# Navigate to your repository directory
+cd /path/to/obsidian-mcp-bridge
+
+# Run the test
 python test_connection.py
 ```
+
+> **Windows example:** `cd C:\Users\YourName\repos\obsidian-mcp-bridge`
+> **macOS/Linux example:** `cd ~/repos/obsidian-mcp-bridge`
 
 **Expected output:**
 ```
@@ -140,7 +146,11 @@ Requesting render (this may take 2-3 seconds for Dataview)...
 - Are Community Plugins allowed? (Safe Mode = OFF)
 - Do the files exist?
   ```bash
-  ls "C:\Users\sthat\OneDrive\Documents\Obsidian\DigitalGarden\.obsidian\plugins\obsidian-mcp-bridge"
+  # Windows
+  dir "<VAULT_PATH>\.obsidian\plugins\obsidian-mcp-bridge"
+
+  # macOS/Linux
+  ls "<VAULT_PATH>/.obsidian/plugins/obsidian-mcp-bridge"
   ```
 
 **Fix:**
@@ -238,14 +248,14 @@ Show me the raw markdown of Home.md
 
 ### Configure AI Client
 
-**Claude Code:**
-Edit `%APPDATA%\Claude\claude_desktop_config.json`:
+**Claude Code (Python Server):**
+Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 ```json
 {
   "mcpServers": {
     "obsidian": {
       "command": "python",
-      "args": ["C:/Users/sthat/Source/Repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"],
+      "args": ["/absolute/path/to/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"],
       "env": {
         "OBSIDIAN_MCP_KEY": "your-api-key-here"
       }
@@ -254,13 +264,33 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 }
 ```
 
+**Claude Code (Node Server - Recommended):**
+```json
+{
+  "mcpServers": {
+    "obsidian": {
+      "command": "node",
+      "args": ["/absolute/path/to/obsidian-mcp-bridge/mcp-server-node/dist/main.js"],
+      "env": {
+        "OBSIDIAN_MCP_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+> **Path Examples:**
+> - **Windows:** `"C:/Users/YourName/repos/obsidian-mcp-bridge/mcp-server-node/dist/main.js"`
+> - **macOS/Linux:** `"/home/username/repos/obsidian-mcp-bridge/mcp-server-node/dist/main.js"`
+> - **WSL:** `"/mnt/c/Users/YourName/repos/obsidian-mcp-bridge/mcp-server-node/dist/main.js"`
+
 **Codex:**
 Edit `~/.codex/config.toml`:
 ```toml
 [[servers]]
 name = "obsidian-direct"
 command = "python"
-args = ["C:/Users/sthat/Source/Repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"]
+args = ["/absolute/path/to/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"]
 env = { OBSIDIAN_MCP_KEY = "your-api-key-here" }
 ```
 
@@ -276,21 +306,31 @@ env = { OBSIDIAN_MCP_KEY = "your-api-key-here" }
 
 ### Repository
 ```
-C:\Users\sthat\Source\Repos\obsidian-mcp-bridge\
-├── plugin/src/           # Source code
-├── plugin/main.js        # Built plugin
-├── mcp-server/           # Python MCP server
-├── test_connection.py    # Connection test script
-└── docs/setup.md         # Detailed docs
+/path/to/obsidian-mcp-bridge/
+├── plugin/src/              # Plugin source code
+├── plugin/main.js           # Built plugin
+├── mcp-server/              # Python MCP server
+├── mcp-server-node/         # Node/TypeScript MCP server
+├── test_connection.py       # Connection test script
+└── docs/                    # Documentation
 ```
+
+> **Your repository location:**
+> - **Windows:** `C:\Users\YourName\repos\obsidian-mcp-bridge\`
+> - **macOS:** `/Users/username/repos/obsidian-mcp-bridge/`
+> - **Linux:** `/home/username/repos/obsidian-mcp-bridge/`
 
 ### Installed Plugin
 ```
-C:\Users\sthat\OneDrive\Documents\Obsidian\DigitalGarden\
-└── .obsidian\plugins\obsidian-mcp-bridge\
-    ├── main.js
-    └── manifest.json
+<VAULT_PATH>/.obsidian/plugins/obsidian-mcp-bridge/
+├── main.js
+└── manifest.json
 ```
+
+> **Default Obsidian vault locations:**
+> - **Windows:** `C:\Users\YourName\Documents\Obsidian\VaultName\`
+> - **macOS:** `~/Documents/Obsidian/VaultName/`
+> - **Linux:** `~/Documents/Obsidian/VaultName/`
 
 ---
 
@@ -298,20 +338,28 @@ C:\Users\sthat\OneDrive\Documents\Obsidian\DigitalGarden\
 
 **Build plugin:**
 ```bash
-cd C:\Users\sthat\Source\Repos\obsidian-mcp-bridge\plugin
+cd /path/to/obsidian-mcp-bridge/plugin
 npm run build
 ```
 
-**Rebuild and update:**
+**Rebuild and update (Windows):**
 ```bash
-npm run build && cp main.js "C:\Users\sthat\OneDrive\Documents\Obsidian\DigitalGarden\.obsidian\plugins\obsidian-mcp-bridge\"
+npm run build
+copy main.js "<VAULT_PATH>\.obsidian\plugins\obsidian-mcp-bridge\main.js"
+```
+
+**Rebuild and update (macOS/Linux):**
+```bash
+npm run build && cp main.js "<VAULT_PATH>/.obsidian/plugins/obsidian-mcp-bridge/main.js"
 ```
 
 **Test connection:**
 ```bash
-cd C:\Users\sthat\Source\Repos\obsidian-mcp-bridge
+cd /path/to/obsidian-mcp-bridge
 python test_connection.py
 ```
+
+> **Note:** Replace `/path/to/` and `<VAULT_PATH>` with your actual paths.
 
 **Check plugin status (in Obsidian):**
 - Command Palette → "MCP Bridge: Copy API Key"

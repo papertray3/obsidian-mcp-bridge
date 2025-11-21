@@ -56,7 +56,26 @@ export OBSIDIAN_MCP_KEY="your-api-key-here"
   "mcpServers": {
     "obsidian": {
       "command": "python",
-      "args": ["C:/Users/sthat/Source/Repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"],
+      "args": ["/absolute/path/to/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"],
+      "env": {
+        "OBSIDIAN_MCP_KEY": "your-api-key-from-plugin-settings"
+      }
+    }
+  }
+}
+```
+
+> **Note:** Replace `/absolute/path/to/` with your actual repository location.
+> - **Windows example:** `"C:/Users/YourName/repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"`
+> - **macOS/Linux example:** `"/home/username/repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"`
+
+**Node Server (Alternative):**
+```json
+{
+  "mcpServers": {
+    "obsidian": {
+      "command": "node",
+      "args": ["/absolute/path/to/obsidian-mcp-bridge/mcp-server-node/dist/main.js"],
       "env": {
         "OBSIDIAN_MCP_KEY": "your-api-key-from-plugin-settings"
       }
@@ -71,9 +90,11 @@ export OBSIDIAN_MCP_KEY="your-api-key-here"
 [[servers]]
 name = "obsidian-direct"
 command = "python"
-args = ["C:/Users/sthat/Source/Repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"]
+args = ["/absolute/path/to/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"]
 env = { OBSIDIAN_MCP_KEY = "your-api-key-from-plugin-settings" }
 ```
+
+> **Note:** Use absolute paths, not relative paths. Replace `/absolute/path/to/` with your actual repository location.
 
 ## Features
 

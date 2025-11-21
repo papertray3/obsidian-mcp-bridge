@@ -10,6 +10,8 @@ The `render_note_dg_compiled` MCP tool leverages the Digital Garden plugin's com
 - Obsidian MCP Bridge plugin running
 - MCP server configured in your AI client
 
+**Note:** The MCP Bridge will automatically initialize the Digital Garden compiler on first use. You may see the Publication Center modal open and close briefly - this is normal and only happens once per Obsidian session.
+
 ## Important: dg-publish Not Required
 
 **This tool compiles ANY file you request, regardless of `dg-publish` frontmatter.**
@@ -35,13 +37,18 @@ Use the render_note_dg_compiled tool to render "Notes/Dashboards/🔎Garden Dash
 ```json
 {
   "success": true,
-  "cachePath": "C:/Users/you/vault/.obsidian/cache/mcp-bridge-render/abc123.../note.html",
+  "cachePath": ".cache/compiled-notes/abc123.../note.html",
   "length": 25432,
   "hash": "abc123...",
   "lastModified": 1736605234000,
   "cacheHit": false
 }
 ```
+
+**Note:** The `cachePath` is vault-relative (e.g., `.cache/...`) for cross-environment compatibility. AI agents can construct the full path based on their environment:
+- Windows: `${vaultPath}\.cache\compiled-notes\...`
+- WSL: `/mnt/c/.../vault/.cache/compiled-notes/...`
+- Unix: `/Users/.../vault/.cache/compiled-notes/...`
 
 ### Reading the Cached File
 
@@ -60,18 +67,12 @@ This gives you the full rendered HTML with all Dataview queries executed.
 - ✅ Note is large (>10KB) and may exceed MCP limits
 - ✅ You need Digital Garden's exact compilation output
 - ✅ You'll access the same note multiple times (caching benefit)
-- ✅ You want the same output that would be published
-
-### Use `render_note` when:
-- ✅ You need quick inline HTML without setup
-- ✅ Note is small (<10KB)
-- ✅ Digital Garden plugin not available
-- ✅ You don't need exact DG compilation
+- ✅ You want the same output that would be published to your digital garden
 
 ### Use `get_note_raw` when:
 - ✅ You only need the raw markdown
 - ✅ You'll process the content yourself
-- ✅ You don't need Dataview execution
+- ✅ You don't need Dataview execution or plugin rendering
 
 ## Cache Behavior
 
@@ -140,7 +141,10 @@ Cache key is based on: `hash(filepath + mtime + size)`
 **Solution:**
 1. Install Digital Garden plugin from Community Plugins
 2. Enable it in Settings → Community Plugins
-3. Configure Digital Garden settings (repo, etc.)
+3. Configure Digital Garden settings (repo URL, etc.)
+4. The MCP Bridge will automatically initialize the compiler on first use
+
+**Note:** If you see this error, the auto-initialization failed. The Digital Garden plugin must be enabled for the MCP Bridge to initialize it.
 
 ### File Not Found
 **Error:**
@@ -207,15 +211,16 @@ Get cache stats from MCP Bridge settings
 
 ## Comparison Table
 
-| Feature | render_note | render_note_dg_compiled | get_note_raw |
-|---------|-------------|-------------------------|--------------|
-| Dataview execution | ✅ Yes | ✅ Yes | ❌ No |
-| Caching | ❌ No | ✅ Yes | ❌ No |
-| Size limit | 10KB MCP limit | No limit (returns path) | 10KB MCP limit |
-| DG compilation | ❌ No | ✅ Yes | ❌ No |
-| First call speed | 2-3 sec | 2-3 sec | <100ms |
-| Cached call speed | N/A | <50ms | N/A |
-| Requires DG plugin | ❌ No | ✅ Yes | ❌ No |
+| Feature | render_note_dg_compiled | get_note_raw |
+|---------|-------------------------|--------------|
+| Dataview execution | ✅ Yes | ❌ No |
+| Caching | ✅ Yes | ❌ No |
+| Size limit | No limit (returns vault-relative path) | 10KB MCP limit |
+| DG compilation | ✅ Yes | ❌ No |
+| First call speed | 2-3 sec | <100ms |
+| Cached call speed | <50ms | N/A |
+| Requires DG plugin | ✅ Yes (auto-initialized) | ❌ No |
+| Cross-environment paths | ✅ Yes (vault-relative) | N/A |
 
 ## Examples
 

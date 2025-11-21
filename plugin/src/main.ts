@@ -3,8 +3,9 @@ import { randomUUID } from 'crypto';
 import * as path from 'path';
 import { MCPBridgeSettings, DEFAULT_SETTINGS, MCPBridgeSettingsTab } from './settings';
 import { MCPWebSocketServer, MCPRequest } from './websocket-server';
-import { renderNote, getRawNote } from './handlers/render-note';
+import { getRawNote } from './handlers/render-note';
 import { renderNoteDGCompiled } from './handlers/dg-compiled-render';
+import { runDataviewBlock, extractDataviewBlocks } from './handlers/dataview-block';
 import { RenderedContentCacheManager, CacheSettings } from './cache-manager';
 
 export default class MCPBridgePlugin extends Plugin {
@@ -27,11 +28,10 @@ export default class MCPBridgePlugin extends Plugin {
 		}
 
 		// Initialize cache manager
+		const vaultBasePath = (this.app.vault.adapter as any).basePath;
 		const cacheSettings: CacheSettings = {
-			cacheDir: path.join(
-				(this.app.vault.adapter as any).basePath,
-				this.settings.cacheDirPath
-			),
+			cacheDir: path.join(vaultBasePath, this.settings.cacheDirPath),
+			vaultBasePath: vaultBasePath,
 			maxSizeMB: this.settings.cacheMaxSizeMB
 		};
 		this.cacheManager = new RenderedContentCacheManager(this.app.vault, cacheSettings);
@@ -107,14 +107,22 @@ export default class MCPBridgePlugin extends Plugin {
 		console.log(`MCP Bridge: Handling request: ${method}`, params);
 
 		switch (method) {
-			case 'render_note':
-				return await renderNote(this, params.filepath);
-
 			case 'get_note_raw':
 				return await getRawNote(this, params.filepath);
 
 			case 'render_note_dg_compiled':
 				return await renderNoteDGCompiled(this, params.filepath);
+
+			case 'run_dataview_block':
+				return await runDataviewBlock(this, {
+					filepath: params.filepath,
+					flavor: params.flavor,
+					source: params.source,
+					input: params.input
+				});
+
+			case 'extract_dataview_blocks':
+				return await extractDataviewBlocks(this, params.filepath);
 
 			case 'list_vault_files':
 				return await this.listVaultFiles(params.folder);
@@ -133,6 +141,16 @@ export default class MCPBridgePlugin extends Plugin {
 
 			case 'ping':
 				return { status: 'ok', timestamp: Date.now() };
+
+			case 'broadcast':
+				// Broadcast a message to all connected WebSocket clients
+				// Used for real-time event notifications (e.g., agent status updates)
+				this.server.broadcast({
+					type: params.type || 'event',
+					timestamp: Date.now(),
+					...params
+				});
+				return { status: 'broadcast_sent', clients: this.server['clients'].size };
 
 			default:
 				throw new Error(`Unknown method: ${method}`);

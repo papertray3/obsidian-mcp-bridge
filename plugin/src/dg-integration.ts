@@ -8,6 +8,7 @@ interface DigitalGardenPlugin {
 	settings?: any;
 	publishModal?: {
 		publisher?: any;
+		close?: () => void;
 	};
 	// Constructor references (if exposed)
 	Publisher?: any;
@@ -68,6 +69,52 @@ export class DigitalGardenIntegration {
 	}
 
 	/**
+	 * Initialize Digital Garden by triggering the Publication Center command
+	 * This creates the publishModal and publisher objects needed for compilation
+	 */
+	private async initializeDigitalGarden(): Promise<void> {
+		try {
+			console.log('MCP Bridge: Initializing Digital Garden compiler...');
+
+			// Execute the "Open Publication Center" command
+			// This triggers DG to create its publishModal and publisher
+			await (this.app as any).commands.executeCommandById('digitalgarden:dg-open-publish-modal');
+
+			// Give DG a moment to initialize
+			await new Promise(resolve => setTimeout(resolve, 100));
+
+			// Close the modal (we don't need to show it to the user)
+			const dgPlugin = this.getDigitalGardenPlugin();
+			if (dgPlugin?.publishModal) {
+				const modal = dgPlugin.publishModal as any;
+
+				// Try different close methods
+				if (typeof modal.close === 'function') {
+					modal.close();
+				} else if (modal.modal && typeof modal.modal.close === 'function') {
+					modal.modal.close();
+				} else {
+					// Fallback: click close button
+					const modals = (this.app.workspace as any).modalContainers || [];
+					for (const container of modals) {
+						if (container.win && container.win.document) {
+							const closeBtn = container.win.document.querySelector('.modal-close-button');
+							if (closeBtn) {
+								(closeBtn as HTMLElement).click();
+								break;
+							}
+						}
+					}
+				}
+			}
+
+			console.log('MCP Bridge: Digital Garden compiler initialized successfully');
+		} catch (error) {
+			console.error('MCP Bridge: Failed to initialize DG:', error);
+		}
+	}
+
+	/**
 	 * Get Digital Garden plugin instance
 	 */
 	private getDigitalGardenPlugin(): DigitalGardenPlugin | null {
@@ -123,6 +170,16 @@ export class DigitalGardenIntegration {
 			);
 		}
 
+		// If publisher not initialized, try to trigger DG initialization
+		if (!dgPlugin.publishModal?.publisher) {
+			await this.initializeDigitalGarden();
+
+			// Check again after initialization attempt
+			if (!dgPlugin.publishModal?.publisher) {
+				console.warn('MCP Bridge: DG publisher still not available after initialization');
+			}
+		}
+
 		// Get settings
 		const settings = dgPlugin.settings;
 		if (!settings) {
@@ -141,10 +198,14 @@ export class DigitalGardenIntegration {
 		// Option 1: Get from publishModal if it exists
 		if (dgPlugin.publishModal?.publisher) {
 			const publisherInstance = dgPlugin.publishModal.publisher;
-			// Use the existing publisher's compiler
 			const compiler = publisherInstance.compiler;
 			if (compiler) {
-				return await this.compileWithCompiler(file, compiler, vault, metadataCache, settings);
+				try {
+					return await this.compileWithCompiler(file, compiler, vault, metadataCache, settings);
+				} catch (error) {
+					console.error('MCP Bridge: Compilation failed:', error);
+					// Fall through to try other options
+				}
 			}
 		}
 
@@ -155,18 +216,24 @@ export class DigitalGardenIntegration {
 		GardenPageCompiler = dgPlugin.GardenPageCompiler || (dgPlugin as any).constructor?.GardenPageCompiler;
 
 		// Option 3: Access via module/require (if DG exports them)
+		// Note: This usually doesn't work in Obsidian, but try anyway
 		if (!Publisher) {
-			// @ts-ignore
-			const dgModule = window.require?.('digitalgarden');
-			if (dgModule) {
-				Publisher = dgModule.Publisher;
-				GardenPageCompiler = dgModule.GardenPageCompiler;
+			try {
+				// @ts-ignore
+				const dgModule = window.require?.('digitalgarden');
+				if (dgModule) {
+					Publisher = dgModule.Publisher;
+					GardenPageCompiler = dgModule.GardenPageCompiler;
+				}
+			} catch (e) {
+				// Require failed - this is expected, Obsidian plugins aren't requireable
+				// Continue to next check
 			}
 		}
 
 		if (!Publisher && !GardenPageCompiler) {
 			throw new DigitalGardenNotAvailableError(
-				'Cannot access Digital Garden compiler classes. This is a technical limitation - the Digital Garden plugin does not expose its internal classes for external use. You may need to use render_note instead, which uses Obsidian\'s native rendering.'
+				'Cannot access Digital Garden compiler classes. The Digital Garden plugin may need to be opened or configured before its compiler becomes available. Try opening a note and using the Digital Garden "Publish Single Note" command, then retry.'
 			);
 		}
 
@@ -242,14 +309,28 @@ export class DigitalGardenIntegration {
 
 		// Call the compiler
 		try {
-			const [markdown, assets] = await compiler.generateMarkdown(publishFile);
+			const result = await compiler.generateMarkdown(publishFile);
+
+			// Handle different return formats
+			let markdown: string;
+			let assets: any;
+
+			if (Array.isArray(result)) {
+				[markdown, assets] = result;
+			} else if (typeof result === 'string') {
+				markdown = result;
+				assets = { images: [] };
+			} else {
+				markdown = result?.markdown || result?.content || '';
+				assets = result?.assets || { images: [] };
+			}
 
 			return {
 				markdown,
 				assets: assets || { images: [] }
 			};
 		} catch (error) {
-			console.error('Digital Garden compilation error:', error);
+			console.error('MCP Bridge: Digital Garden compilation error:', error);
 			throw new Error(`Failed to compile file with Digital Garden: ${error.message}`);
 		}
 	}

@@ -5,11 +5,13 @@ export interface MCPRequest {
 	auth?: string;
 	method: string;
 	params: Record<string, any>;
+	id?: string;
 }
 
 export interface MCPResponse {
 	result?: any;
 	error?: string;
+	id?: string;
 }
 
 export class MCPWebSocketServer {
@@ -107,14 +109,16 @@ export class MCPWebSocketServer {
 
 	private handleConnection(ws: SimpleWebSocket): void {
 		ws.onmessage = async (msg) => {
+			let request: MCPRequest | undefined;
 			try {
-				const request = JSON.parse(msg.data) as MCPRequest;
+				request = JSON.parse(msg.data) as MCPRequest;
 
 				// Authenticate
 				if (this.plugin.settings.requireAuth) {
 					if (!request.auth || request.auth !== this.plugin.settings.apiKey) {
 						const response: MCPResponse = {
-							error: 'Unauthorized: Invalid API key'
+							error: 'Unauthorized: Invalid API key',
+							id: request.id
 						};
 						ws.send(JSON.stringify(response));
 						return;
@@ -123,13 +127,17 @@ export class MCPWebSocketServer {
 
 				// Handle request
 				const result = await this.plugin.handleRequest(request);
-				const response: MCPResponse = { result };
+				const response: MCPResponse = {
+					result,
+					id: request.id
+				};
 				ws.send(JSON.stringify(response));
 
 			} catch (error) {
 				console.error('MCP Bridge: Request handling error:', error);
 				const response: MCPResponse = {
-					error: error instanceof Error ? error.message : 'Unknown error'
+					error: error instanceof Error ? error.message : 'Unknown error',
+					id: request?.id
 				};
 				ws.send(JSON.stringify(response));
 			}
@@ -156,5 +164,22 @@ export class MCPWebSocketServer {
 		}
 
 		return allowedOrigins.includes(origin);
+	}
+
+	/**
+	 * Broadcast a message to all connected clients
+	 * Used for real-time event notifications (e.g., job status updates)
+	 */
+	broadcast(message: any): void {
+		const messageStr = typeof message === 'string' ? message : JSON.stringify(message);
+		console.log(`MCP Bridge: Broadcasting to ${this.clients.size} clients:`, messageStr);
+
+		for (const client of this.clients) {
+			try {
+				client.send(messageStr);
+			} catch (error) {
+				console.error('MCP Bridge: Error broadcasting to client:', error);
+			}
+		}
 	}
 }

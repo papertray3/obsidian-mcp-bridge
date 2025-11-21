@@ -18,7 +18,7 @@ except ImportError:
 
 # Import MCP SDK
 try:
-    from mcp.server import Server
+    from mcp.server import Server, NotificationOptions
     from mcp.server.stdio import stdio_server
     from mcp.types import Tool, TextContent
 except ImportError:
@@ -37,6 +37,9 @@ OBSIDIAN_WS_URL = f"{protocol}://{OBSIDIAN_HOST}:{OBSIDIAN_PORT}"
 
 # Global WebSocket connection
 ws_connection: Optional[websockets.WebSocketClientProtocol] = None
+
+# Track pending requests to distinguish broadcasts from responses
+pending_requests = set()
 
 # Create MCP server
 app = Server("obsidian-direct")
@@ -96,34 +99,49 @@ async def call_plugin(method: str, params: dict) -> Any:
     """Send request to Obsidian plugin via WebSocket"""
     await ensure_connection()
 
-    # Build request
+    # Build request with unique ID
+    request_id = f"{method}_{id(params)}"
     request = {
         "auth": OBSIDIAN_API_KEY,
         "method": method,
-        "params": params
+        "params": params,
+        "id": request_id
     }
 
     try:
+        # Track this request
+        pending_requests.add(request_id)
+
         # Send request
         await ws_connection.send(json.dumps(request))
 
-        # Wait for response
-        response_str = await ws_connection.recv()
-        response = json.loads(response_str)
+        # Wait for response with matching ID
+        while True:
+            response_str = await ws_connection.recv()
+            response = json.loads(response_str)
 
-        # Handle errors
-        if "error" in response:
-            raise Exception(response["error"])
+            # Check if this is our response
+            if response.get("id") == request_id:
+                pending_requests.discard(request_id)
 
-        # Return result
-        return response.get("result")
+                # Handle errors
+                if "error" in response:
+                    raise Exception(response["error"])
+
+                # Return result
+                return response.get("result")
+
+            # This is a broadcast notification - handle it in the background listener
+            # (it will be picked up by the broadcast listener task)
 
     except websockets.exceptions.ConnectionClosed:
+        pending_requests.discard(request_id)
         # Try to reconnect once
         await connect_to_plugin()
         return await call_plugin(method, params)
 
     except Exception as e:
+        pending_requests.discard(request_id)
         raise Exception(f"Plugin call failed: {str(e)}")
 
 
@@ -133,20 +151,6 @@ async def call_plugin(method: str, params: dict) -> Any:
 async def list_tools() -> list[Tool]:
     """List available tools"""
     return [
-        Tool(
-            name="render_note",
-            description="Get fully-rendered HTML content of a note. Includes executed Dataview queries, plugin output, etc. Matches exactly what you see in Obsidian UI.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "filepath": {
-                        "type": "string",
-                        "description": "Path to the note file (relative to vault root)"
-                    }
-                },
-                "required": ["filepath"]
-            }
-        ),
         Tool(
             name="get_note_raw",
             description="Get raw markdown content of a note (no rendering)",
@@ -247,6 +251,46 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="run_dataview_block",
+            description="Execute a Dataview or DataviewJS query block and return the rendered result. Useful for extracting specific tables or data from notes without rendering entire dashboards. Requires Dataview plugin to be installed and enabled.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Optional: Path to the note file to use as execution context (for this.file, dv.current(), etc.)"
+                    },
+                    "flavor": {
+                        "type": "string",
+                        "enum": ["dataview", "dataviewjs"],
+                        "description": "Type of query: 'dataview' for DQL queries, 'dataviewjs' for JavaScript code"
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "The query or script source code (without the ```dataview wrapper)"
+                    },
+                    "input": {
+                        "description": "Optional: Input data to pass to DataviewJS scripts (available as 'input' variable)"
+                    }
+                },
+                "required": ["flavor", "source"]
+            }
+        ),
+        Tool(
+            name="extract_dataview_blocks",
+            description="Extract all Dataview and DataviewJS blocks from a note. Returns list of blocks with their source code, type, and line numbers. Useful for discovering what queries are in a note before executing them.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Path to the note file (relative to vault root)"
+                    }
+                },
+                "required": ["filepath"]
+            }
+        ),
+        Tool(
             name="ping",
             description="Check if connection to Obsidian plugin is working",
             inputSchema={
@@ -262,11 +306,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     """Handle tool calls"""
     try:
         # Route to plugin
-        if name == "render_note":
-            result = await call_plugin("render_note", {"filepath": arguments["filepath"]})
-            return [TextContent(type="text", text=result)]
-
-        elif name == "get_note_raw":
+        if name == "get_note_raw":
             result = await call_plugin("get_note_raw", {"filepath": arguments["filepath"]})
             return [TextContent(type="text", text=result)]
 
@@ -315,6 +355,29 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await call_plugin("render_note_dg_compiled", {"filepath": filepath})
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
+        elif name == "run_dataview_block":
+            flavor = arguments.get("flavor")
+            source = arguments.get("source")
+            if not flavor:
+                raise ValueError("run_dataview_block requires flavor (dataview or dataviewjs)")
+            if not source:
+                raise ValueError("run_dataview_block requires source (the query/script)")
+
+            result = await call_plugin("run_dataview_block", {
+                "filepath": arguments.get("filepath", ""),
+                "flavor": flavor,
+                "source": source,
+                "input": arguments.get("input")
+            })
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "extract_dataview_blocks":
+            filepath = arguments.get("filepath")
+            if not filepath:
+                raise ValueError("extract_dataview_blocks requires filepath")
+            result = await call_plugin("extract_dataview_blocks", {"filepath": filepath})
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
         elif name == "ping":
             result = await call_plugin("ping", {})
             return [TextContent(type="text", text=json.dumps(result))]
@@ -326,6 +389,41 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         return [TextContent(type="text", text=f"Error: {str(e)}")]
 
 
+async def broadcast_listener():
+    """Background task that listens for broadcast notifications from the vault"""
+    print("Starting broadcast listener...", file=sys.stderr)
+
+    while True:
+        try:
+            await ensure_connection()
+
+            # Listen for messages
+            message_str = await ws_connection.recv()
+            message = json.loads(message_str)
+
+            # Check if this is a broadcast (not a response to our request)
+            # Broadcasts won't have an 'id' field or will have id not in pending_requests
+            message_id = message.get("id")
+            if message_id is None or message_id not in pending_requests:
+                # This is a broadcast notification from the vault
+                print(f"Broadcast received: {message}", file=sys.stderr)
+
+                # Forward to AI client as a notification
+                await app.request_context.session.send_notification(
+                    "vault/notification",
+                    message
+                )
+
+        except websockets.exceptions.ConnectionClosed:
+            print("WebSocket closed in broadcast listener, reconnecting...", file=sys.stderr)
+            await asyncio.sleep(1)
+            await connect_to_plugin()
+
+        except Exception as e:
+            print(f"Error in broadcast listener: {e}", file=sys.stderr)
+            await asyncio.sleep(1)
+
+
 async def main():
     """Main entry point"""
     # Connect to plugin
@@ -333,11 +431,21 @@ async def main():
 
     # Run stdio server
     async with stdio_server() as (read_stream, write_stream):
-        await app.run(
-            read_stream,
-            write_stream,
-            app.create_initialization_options()
-        )
+        # Create a task for the broadcast listener
+        listener_task = asyncio.create_task(broadcast_listener())
+
+        try:
+            await app.run(
+                read_stream,
+                write_stream,
+                app.create_initialization_options()
+            )
+        finally:
+            listener_task.cancel()
+            try:
+                await listener_task
+            except asyncio.CancelledError:
+                pass
 
 
 if __name__ == "__main__":

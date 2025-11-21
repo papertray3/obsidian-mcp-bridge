@@ -19,6 +19,7 @@ export interface CacheMetadata {
 
 export interface CacheSettings {
 	cacheDir: string;
+	vaultBasePath: string;
 	maxSizeMB: number;
 }
 
@@ -41,6 +42,23 @@ export class RenderedContentCacheManager {
 	private generateCacheKey(file: TFile): string {
 		const input = `${file.path}|${file.stat.mtime}|${file.stat.size}`;
 		return createHash('sha256').update(input).digest('hex');
+	}
+
+	/**
+	 * Convert absolute path to vault-relative path
+	 * This ensures paths work across different environments (Windows/WSL/Unix)
+	 */
+	private toVaultRelativePath(absolutePath: string): string {
+		const vaultBase = this.settings.vaultBasePath;
+		if (absolutePath.startsWith(vaultBase)) {
+			// Remove vault base and normalize separators
+			return absolutePath
+				.substring(vaultBase.length)
+				.replace(/^[/\\]+/, '')  // Remove leading slashes
+				.replace(/\\/g, '/');    // Normalize to forward slashes
+		}
+		// If path doesn't start with vault base, return as-is (shouldn't happen)
+		return absolutePath;
 	}
 
 	/**
@@ -70,7 +88,8 @@ export class RenderedContentCacheManager {
 		// Read cached content
 		const content = fs.readFileSync(cachePath, 'utf-8');
 
-		return { content, cachePath };
+		// Return vault-relative path for cross-environment compatibility
+		return { content, cachePath: this.toVaultRelativePath(cachePath) };
 	}
 
 	/**
@@ -110,7 +129,8 @@ export class RenderedContentCacheManager {
 		// Enforce size limit
 		await this.enforceSizeLimit();
 
-		return cachePath;
+		// Return vault-relative path for cross-environment compatibility
+		return this.toVaultRelativePath(cachePath);
 	}
 
 	/**
