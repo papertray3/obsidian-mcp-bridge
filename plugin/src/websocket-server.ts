@@ -44,16 +44,6 @@ export class MCPWebSocketServer {
 				console.log('MCP Bridge: Client connected');
 				this.clients.add(ws);
 
-				// Check origin if remote access enabled
-				if (this.plugin.settings.enableRemote) {
-					const origin = req.headers.origin;
-					if (!this.isOriginAllowed(origin)) {
-						console.warn(`MCP Bridge: Origin not allowed: ${origin}`);
-						ws.close();
-						return;
-					}
-				}
-
 				this.handleConnection(ws);
 
 				ws.onclose = () => {
@@ -146,24 +136,6 @@ export class MCPWebSocketServer {
 		ws.onerror = (error: Error) => {
 			console.error('MCP Bridge: WebSocket connection error:', error);
 		};
-	}
-
-	private isOriginAllowed(origin: string | undefined): boolean {
-		if (!this.plugin.settings.enableRemote) {
-			return true; // Localhost connections always allowed
-		}
-
-		if (!origin) {
-			return false; // No origin header = reject
-		}
-
-		const { allowedOrigins } = this.plugin.settings;
-
-		if (allowedOrigins.length === 0) {
-			return false; // No origins configured = reject all
-		}
-
-		return allowedOrigins.includes(origin);
 	}
 
 	/**

@@ -1,9 +1,9 @@
 {
   "id": "obsidian-mcp-bridge",
-  "name": "MCP Bridge",
-  "version": "0.1.0",
+  "name": "MCP Bridge (Minimal)",
+  "version": "2.0.0-minimal",
   "minAppVersion": "1.4.0",
-  "description": "Exposes Obsidian APIs to AI clients via Model Context Protocol. Enables perfect rendering of Dataview queries, plugin access, and semantic search.",
+  "description": "Minimal WebSocket server for Model Context Protocol integration. Clean starting point for dynamic tool registry.",
   "author": "papertray3",
   "authorUrl": "https://github.com/papertray3/obsidian-mcp-bridge",
   "isDesktopOnly": true
