@@ -3,14 +3,27 @@ import { randomUUID } from 'crypto';
 import { MCPBridgeSettings, DEFAULT_SETTINGS, MCPBridgeSettingsTab } from './settings';
 import { MCPWebSocketServer, MCPRequest } from './websocket-server';
 import { ToolRegistry } from './tool-registry';
+import * as path from 'path';
+import { RenderedContentCacheManager, CacheSettings } from './cache-manager';
+import { runDataviewBlock, extractDataviewBlocks } from './handlers/dataview-block';
 
 export default class MCPBridgePlugin extends Plugin {
 	settings: MCPBridgeSettings;
 	server: MCPWebSocketServer;
 	toolRegistry: ToolRegistry;
+	cacheManager: RenderedContentCacheManager;
 
 	async onload() {
 		await this.loadSettings();
+
+		// Initialize cache manager
+		const vaultBasePath = (this.app.vault.adapter as any).basePath;
+		const cacheSettings: CacheSettings = {
+			cacheDir: path.join(vaultBasePath, this.settings.cacheDirPath),
+			vaultBasePath: vaultBasePath,
+			maxSizeMB: this.settings.cacheMaxSizeMB
+		};
+		this.cacheManager = new RenderedContentCacheManager(this.app.vault, cacheSettings);
 
 		// Generate API key if not set
 		if (!this.settings.apiKey) {
@@ -185,6 +198,12 @@ export default class MCPBridgePlugin extends Plugin {
 
 			case 'list_vault_files':
 				return this.listVaultFiles(params);
+
+			case 'run_dataview_block':
+				return await runDataviewBlock(this, params);
+
+			case 'extract_dataview_blocks':
+				return await extractDataviewBlocks(this, params.filepath);
 
 			default:
 				throw new Error(`Unknown builtin tool: ${method}`);
