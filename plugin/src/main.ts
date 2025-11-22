@@ -37,6 +37,7 @@ export default class MCPBridgePlugin extends Plugin {
 		}
 
 		// Initialize tool registry
+		debugger;
 		const pluginDir = (this.manifest as any).dir || this.app.vault.configDir;
 		this.toolRegistry = new ToolRegistry(this.app, pluginDir);
 
