@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
 import type MCPBridgePlugin from './main';
 import { randomUUID } from 'crypto';
 
@@ -94,6 +94,40 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 				}));
 
 		// === Security Settings ===
+
+		// === Testing & Development ===
+		containerEl.createEl('h3', { text: 'Testing & Development' });
+
+		new Setting(containerEl)
+			.setName('Test Harness')
+			.setDesc('Open the HTML test harness in your default browser to test tools')
+			.addButton(button => button
+				.setButtonText('Open Test Harness')
+				.setCta()
+				.onClick(async () => {
+					const { shell } = require('electron');
+					const path = require('path');
+					const fs = require('fs');
+
+					// Get plugin directory
+					const pluginDir = (this.plugin.manifest as any).dir;
+					const testHarnessPath = path.join(pluginDir, 'test-harness.html');
+
+					// Check if file exists
+					if (!fs.existsSync(testHarnessPath)) {
+						new Notice('Test harness not found. Please ensure test-harness.html is in the plugin directory.');
+						return;
+					}
+
+					// Open in default browser
+					try {
+						await shell.openPath(testHarnessPath);
+						new Notice('Test harness opened in browser');
+					} catch (error) {
+						console.error('Failed to open test harness:', error);
+						new Notice('Failed to open test harness - see console for details');
+					}
+				}));
 		containerEl.createEl('h3', { text: 'Security Settings' });
 
 		new Setting(containerEl)
