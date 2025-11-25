@@ -109,8 +109,9 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 					const path = require('path');
 					const fs = require('fs');
 
-					// Get plugin directory
-					const pluginDir = (this.plugin.manifest as any).dir;
+					// Get plugin directory using vault adapter
+					const vaultBasePath = (this.app.vault.adapter as any).basePath;
+					const pluginDir = path.join(vaultBasePath, '.obsidian', 'plugins', this.plugin.manifest.id);
 					const testHarnessPath = path.join(pluginDir, 'test-harness.html');
 
 					// Check if file exists

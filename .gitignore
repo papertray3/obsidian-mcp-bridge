@@ -1,50 +1,27 @@
-# Node.js
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Build output
-plugin/main.js
-plugin/main.js.map
+# Plugin build outputs
+/main.js
+/main.js.map
 *.js.map
 
-# TypeScript
-*.tsbuildinfo
+# Dependencies
+/node_modules/
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-ENV/
-env/
-.venv
+# Servers
+/servers/python/__pycache__/
+/servers/python/*.pyc
+/servers/node/dist/
+/servers/node/node_modules/
 
-# IDEs
+# Orchestrator
+/orchestrator/node_modules/
+
+# IDE
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
-
-# Secrets
-.env
-.env.local
-*.pem
-*.key
-*.crt
-
-# Obsidian
-.obsidian/
+# Test outputs
+/test-outputs/

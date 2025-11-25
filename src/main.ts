@@ -37,8 +37,7 @@ export default class MCPBridgePlugin extends Plugin {
 		}
 
 		// Initialize tool registry
-		debugger;
-		const pluginDir = (this.manifest as any).dir || this.app.vault.configDir;
+		const pluginDir = path.join(vaultBasePath, '.obsidian', 'plugins', this.manifest.id);
 		this.toolRegistry = new ToolRegistry(this.app, pluginDir);
 
 		try {
@@ -191,6 +190,13 @@ export default class MCPBridgePlugin extends Plugin {
 	 */
 	private async handleBuiltinTool(method: string, params: any): Promise<any> {
 		switch (method) {
+			case 'ping':
+				return {
+					status: 'ok',
+					timestamp: Date.now(),
+					version: '2.0.0-extensible'
+				};
+
 			case 'search_files':
 				return this.searchFiles(params);
 

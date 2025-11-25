@@ -153,6 +153,37 @@ tools:
 
   # User-added custom tools
   user:
+    - name: create_note_from_fileclass
+      description: Create a new note with proper frontmatter based on a Metadata Menu fileClass definition
+      handler: user/create-note-from-fileclass.js
+      category: notes
+      tags: [metadata, fileclass, creation]
+      inputSchema:
+        type: object
+        properties:
+          fileClass:
+            type: string
+            description: "FileClass name (e.g., 'project', 'recipe', 'step', 'doc')"
+          title:
+            type: string
+            description: "Note title/name"
+          path:
+            type: string
+            description: "Optional: Full path where to create the file (defaults to appropriate location based on fileClass)"
+          initialValues:
+            type: object
+            description: "Optional: Key-value pairs to pre-populate frontmatter fields"
+        required: [fileClass, title]
+      outputSchema:
+        type: object
+        properties:
+          success:
+            type: boolean
+          filePath:
+            type: string
+          frontmatter:
+            type: object
+
     # Example (uncomment to enable):
     # - name: my_custom_tool
     #   description: A custom tool I created
