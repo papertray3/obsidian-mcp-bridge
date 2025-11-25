@@ -1,61 +1,140 @@
 # Obsidian MCP Bridge
 
-**Direct API access to Obsidian for AI clients via Model Context Protocol**
+**Unified monorepo for Obsidian MCP Bridge - Plugin, Servers, and Orchestrator**
 
-## Overview
+Direct API access to Obsidian for AI clients via Model Context Protocol.
 
-This project enables AI assistants (Claude Code, Codex, etc.) to access your Obsidian vault with full fidelity:
-- ✅ Extensible tool system (add custom tools without plugin code changes)
-- ✅ YAML-driven schema (single source of truth)
-- ✅ User-scriptable handlers (JavaScript/TypeScript)
-- ✅ Plugin output (Metadata Menu, Digital Garden, SmartConnections, etc.)
-- ✅ Direct API access (no code duplication)
-- ✅ Future-proof (automatic updates when plugins change)
+## 🎯 Overview
+
+This monorepo contains all components of the Mycelium Bridge ecosystem:
+
+- **Obsidian Plugin** - WebSocket server exposing vault APIs
+- **MCP Servers** - Python & Node.js MCP protocol adapters
+- **Orchestrator** - Multi-agent workflow coordination
+- **Tool Registry** - Extensible YAML-driven tool system
+
+### Key Features
+
+✅ **Extensible Tool System** - Add tools via YAML without code changes
+✅ **Auto-Discovery** - MCP servers automatically detect available tools
+✅ **User-Scriptable** - Custom handlers in JavaScript/TypeScript
+✅ **Plugin Integration** - Access Dataview, Metadata Menu, Smart Connections
+✅ **Multi-Agent** - Orchestrator coordinates multiple AI agents
+✅ **Monorepo Structure** - All components in one place for easy development
+
+## 📦 Repository Structure
+
+```
+obsidian-mcp-bridge/              # ← Obsidian plugin root
+├── manifest.json                 # Plugin manifest (required at root)
+├── main.js                       # Compiled plugin (required at root)
+├── package.json                  # Plugin dependencies
+├── src/                          # Plugin source code
+│   ├── main.ts
+│   ├── settings.ts
+│   ├── websocket-server.ts
+│   └── tool-registry.ts
+│
+├── .mcp-bridge/                  # Tool registry
+│   ├── tools.yaml               # Tool definitions
+│   └── handlers/                # Tool handlers
+│       ├── core/                # Built-in handlers
+│       └── user/                # Custom user handlers
+│
+├── servers/                      # MCP Servers
+│   ├── python-old/              # Python MCP server
+│   │   ├── obsidian_mcp_server.py
+│   │   └── obsidian_mcp_server_auto.py
+│   │
+│   └── node-old/                # Node.js MCP server
+│       ├── src/
+│       └── package.json
+│
+├── orchestrator/                 # Multi-agent orchestrator
+│   ├── bin/mycelium.js          # CLI entry point
+│   ├── src/                     # Orchestrator core
+│   └── package.json
+│
+└── docs/                        # Documentation
+```
+
+**Why this structure?** The repository **IS** the plugin - `manifest.json` and `main.js` are at the root, so you can place the entire repo in `.obsidian/plugins/` for easy testing and development.
 
 ## Architecture
 
 ```
-AI Client → MCP Server (Python) → WebSocket → Obsidian Plugin → Obsidian APIs
-                                                      ↓
-                                              YAML Tool Registry
-                                                      ↓
-                                            User Handler Scripts
+AI Client → MCP Server (Python/Node) → WebSocket → Obsidian Plugin → Obsidian APIs
+                                                           ↓
+                                                   YAML Tool Registry
+                                                           ↓
+                                                 User Handler Scripts
 ```
 
-**Two components:**
-1. **Obsidian Plugin** (`plugin/`) - Runs inside Obsidian, exposes APIs via WebSocket
-2. **MCP Server** (`mcp-server/`) - Translates MCP protocol to WebSocket requests
+📖 **[Read the Extensibility Guide](EXTENSIBILITY-plugin.md)** for complete architecture documentation.
 
-**Key Innovation:** Tools are defined in a YAML file and implemented as user scripts, making the system fully extensible without requiring plugin modifications.
+## 🚀 Quick Start
 
-📖 **[Read the Extensibility Guide](plugin/EXTENSIBILITY.md)** for complete architecture documentation.
+### Plugin Installation
 
-## Quick Start
-
-### 1. Install Obsidian Plugin
-
+**Method 1: Direct Copy (for production use)**
 ```bash
-# Copy plugin to Obsidian plugins directory
-cp -r plugin/ ~/.obsidian/plugins/obsidian-mcp-bridge/
+# Copy entire repo to plugins directory
+cp -r /path/to/obsidian-mcp-bridge /path/to/vault/.obsidian/plugins/
 
 # Or on Windows:
-# xcopy plugin "C:\Users\YOUR_USER\AppData\Roaming\obsidian\plugins\obsidian-mcp-bridge\" /E /I
+xcopy "C:\path\to\obsidian-mcp-bridge" ^
+  "%USERPROFILE%\path\to\vault\.obsidian\plugins\obsidian-mcp-bridge" /E /I
 ```
 
-Enable the plugin in Obsidian Settings → Community Plugins
+**Method 2: Symlink (for development)**
+```powershell
+# Windows PowerShell
+New-Item -ItemType SymbolicLink `
+  -Path ".obsidian\plugins\obsidian-mcp-bridge" `
+  -Target "C:\path\to\obsidian-mcp-bridge"
 
-### 2. Configure MCP Server
+# Linux/macOS
+ln -s /path/to/obsidian-mcp-bridge /path/to/vault/.obsidian/plugins/
+```
+
+**Why this works:** Since `manifest.json` and `main.js` are at the repository root, Obsidian recognizes the entire repo as a plugin.
+
+Enable the plugin in **Obsidian Settings → Community Plugins**
+
+### Building the Plugin
 
 ```bash
-# Install Python dependencies
-cd mcp-server
+cd obsidian-mcp-bridge
+npm install
+npm run build    # Compiles TypeScript → main.js at root
+
+# Development mode (auto-rebuild on changes)
+npm run dev
+```
+
+### Configure MCP Server
+
+**Python Server (recommended for auto-discovery):**
+```bash
+cd servers/python-old
 pip install -r requirements.txt
 
 # Set API key (get from plugin settings)
 export OBSIDIAN_MCP_KEY="your-api-key-here"
+
+# Run auto-discovery server
+python obsidian_mcp_server_auto.py
 ```
 
-### 3. Connect AI Client
+**Node Server (alternative):**
+```bash
+cd servers/node-old
+npm install
+npm run build
+npm start
+```
+
+### Connect AI Client
 
 **Claude Code:**
 ```json
@@ -65,26 +144,7 @@ export OBSIDIAN_MCP_KEY="your-api-key-here"
   "mcpServers": {
     "obsidian": {
       "command": "python",
-      "args": ["/absolute/path/to/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"],
-      "env": {
-        "OBSIDIAN_MCP_KEY": "your-api-key-from-plugin-settings"
-      }
-    }
-  }
-}
-```
-
-> **Note:** Replace `/absolute/path/to/` with your actual repository location.
-> - **Windows example:** `"C:/Users/YourName/repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"`
-> - **macOS/Linux example:** `"/home/username/repos/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"`
-
-**Node Server (Alternative):**
-```json
-{
-  "mcpServers": {
-    "obsidian": {
-      "command": "node",
-      "args": ["/absolute/path/to/obsidian-mcp-bridge/mcp-server-node/dist/main.js"],
+      "args": ["/absolute/path/to/obsidian-mcp-bridge/servers/python-old/obsidian_mcp_server_auto.py"],
       "env": {
         "OBSIDIAN_MCP_KEY": "your-api-key-from-plugin-settings"
       }
@@ -97,13 +157,36 @@ export OBSIDIAN_MCP_KEY="your-api-key-here"
 ```toml
 # ~/.codex/config.toml
 [[servers]]
-name = "obsidian-direct"
+name = "obsidian-bridge"
 command = "python"
-args = ["/absolute/path/to/obsidian-mcp-bridge/mcp-server/obsidian_mcp_server.py"]
+args = ["/absolute/path/to/obsidian-mcp-bridge/servers/python-old/obsidian_mcp_server_auto.py"]
 env = { OBSIDIAN_MCP_KEY = "your-api-key-from-plugin-settings" }
 ```
 
-> **Note:** Use absolute paths, not relative paths. Replace `/absolute/path/to/` with your actual repository location.
+> **Note:** Use absolute paths. The auto-discovery server (`_auto.py`) is recommended as it automatically detects all available tools from the plugin.
+
+### Using the Orchestrator
+
+The orchestrator enables multi-agent workflows:
+
+```bash
+cd orchestrator
+npm install
+
+# Initialize config in vault
+node bin/mycelium.js init --vault "/path/to/vault"
+
+# List available tools and roles
+node bin/mycelium.js list
+
+# Run a single job
+node bin/mycelium.js run \
+  --role general-assistant \
+  --prompt "Write a summary of recent notes" \
+  --output "summaries/recent.md"
+```
+
+See [orchestrator/README.md](orchestrator/README.md) for complete documentation.
 
 ## Features
 
