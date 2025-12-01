@@ -47,7 +47,7 @@ export default class MCPBridgePlugin extends Plugin {
 
 		// Initialize tool registry
 		const pluginDir = path.join(vaultBasePath, '.obsidian', 'plugins', this.manifest.id);
-		this.toolRegistry = new ToolRegistry(this.app, pluginDir);
+		this.toolRegistry = new ToolRegistry(this.app, pluginDir, this.settings.toolSearchPaths);
 
 		try {
 			await this.toolRegistry.initialize();

@@ -21,6 +21,8 @@ export interface ToolDefinition {
 		type: string;
 		properties: Record<string, any>;
 	};
+	// Internal metadata (not part of YAML definition)
+	_sourcePath?: string;  // Which search path this tool was discovered from
 }
 
 /**
@@ -75,17 +77,20 @@ export class ToolRegistry {
 	private fileWatcher: any = null;
 	private initialized: boolean = false;
 	private cachedAllTools: ToolDefinition[] = [];
+	private toolSearchPaths: string[];
+	private vaultBasePath: string;
 
-	constructor(app: App, pluginDir: string) {
+	constructor(app: App, pluginDir: string, toolSearchPaths: string[] = []) {
 		this.app = app;
 		this.pluginDir = pluginDir;
+		this.vaultBasePath = (app.vault.adapter as any).basePath;
+		this.toolSearchPaths = toolSearchPaths;
 
 		// Plugin defaults (read-only, shipped with plugin)
 		this.defaultsPath = path.join(pluginDir, 'mcp-bridge', 'defaults', 'tools.defaults.yaml');
 
 		// Vault-level user config (preserved across updates)
-		const vaultPath = (app.vault.adapter as any).basePath;
-		this.vaultConfigDir = path.join(vaultPath, '.obsidian', 'mcp-bridge');
+		this.vaultConfigDir = path.join(this.vaultBasePath, '.obsidian', 'mcp-bridge');
 		this.overridesPath = path.join(this.vaultConfigDir, 'overrides.yaml');
 		this.userToolsDir = path.join(this.vaultConfigDir, 'tools');
 
@@ -205,41 +210,70 @@ export class ToolRegistry {
 	}
 
 	/**
-	 * Discover user-defined tools from vault config directory
+	 * Discover user-defined tools from all configured search paths
 	 */
 	private async discoverUserTools(): Promise<ToolDefinition[]> {
 		const userTools: ToolDefinition[] = [];
+		const seenToolNames = new Set<string>();
 
-		// Check if user tools directory exists
-		if (!fs.existsSync(this.userToolsDir)) {
-			return userTools;
-		}
+		// Search all configured paths
+		for (const searchPath of this.toolSearchPaths) {
+			// Resolve path relative to vault root
+			const absolutePath = path.isAbsolute(searchPath)
+				? searchPath
+				: path.join(this.vaultBasePath, searchPath);
 
-		try {
-			// Scan for .yaml files in tools directory
-			const files = fs.readdirSync(this.userToolsDir)
-				.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
-
-			for (const file of files) {
-				const filePath = path.join(this.userToolsDir, file);
-				const toolDef = await this.loadYaml(filePath);
-
-				if (!toolDef) {
-					console.warn(`MCP Bridge: Failed to load user tool: ${file}`);
-					continue;
-				}
-
-				// Validate required fields
-				if (!toolDef.name || !toolDef.description || !toolDef.handler || !toolDef.inputSchema) {
-					console.warn(`MCP Bridge: Invalid tool definition in ${file} - missing required fields`);
-					continue;
-				}
-
-				userTools.push(toolDef as ToolDefinition);
-				console.log(`MCP Bridge: Discovered user tool: ${toolDef.name} from ${file}`);
+			// Check if directory exists
+			if (!fs.existsSync(absolutePath)) {
+				console.log(`MCP Bridge: Tool search path does not exist: ${searchPath} (${absolutePath})`);
+				continue;
 			}
-		} catch (error) {
-			console.error('MCP Bridge: Error discovering user tools:', error);
+
+			// Check if it's a directory
+			const stats = fs.statSync(absolutePath);
+			if (!stats.isDirectory()) {
+				console.warn(`MCP Bridge: Tool search path is not a directory: ${searchPath}`);
+				continue;
+			}
+
+			try {
+				// Scan for .yaml files in directory
+				const files = fs.readdirSync(absolutePath)
+					.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+
+				console.log(`MCP Bridge: Searching ${searchPath} - found ${files.length} YAML files`);
+
+				for (const file of files) {
+					const filePath = path.join(absolutePath, file);
+					const toolDef = await this.loadYaml(filePath);
+
+					if (!toolDef) {
+						console.warn(`MCP Bridge: Failed to load user tool: ${file} from ${searchPath}`);
+						continue;
+					}
+
+					// Validate required fields
+					if (!toolDef.name || !toolDef.description || !toolDef.handler || !toolDef.inputSchema) {
+						console.warn(`MCP Bridge: Invalid tool definition in ${file} - missing required fields`);
+						continue;
+					}
+
+					// Check for duplicate tool names across all search paths
+					if (seenToolNames.has(toolDef.name)) {
+						console.warn(`MCP Bridge: Duplicate tool name "${toolDef.name}" found in ${searchPath}/${file} - skipping`);
+						continue;
+					}
+
+					seenToolNames.add(toolDef.name);
+					// Add source path metadata for display purposes
+					const toolWithSource = toolDef as ToolDefinition;
+					toolWithSource._sourcePath = searchPath;
+					userTools.push(toolWithSource);
+					console.log(`MCP Bridge: Discovered user tool: ${toolDef.name} from ${searchPath}/${file}`);
+				}
+			} catch (error) {
+				console.error(`MCP Bridge: Error discovering tools in ${searchPath}:`, error);
+			}
 		}
 
 		return userTools;
@@ -404,6 +438,14 @@ export class ToolRegistry {
 		} catch (error) {
 			console.error('MCP Bridge: Failed to setup file watcher:', error);
 		}
+	}
+
+	/**
+	 * Update tool search paths and reload
+	 */
+	async updateSearchPaths(searchPaths: string[]): Promise<void> {
+		this.toolSearchPaths = searchPaths;
+		await this.reload();
 	}
 
 	/**

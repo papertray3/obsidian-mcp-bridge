@@ -232,53 +232,6 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 					}));
 		}
 
-		// === Cache Settings ===
-		containerEl.createEl('h3', { text: 'Cache Settings' });
-
-		new Setting(containerEl)
-			.setName('Cache Directory')
-			.setDesc('Directory for storing compiled note cache (relative to vault root)')
-			.addText(text => text
-				.setPlaceholder('.obsidian/cache/mcp-bridge-render')
-				.setValue(this.plugin.settings.cacheDirPath)
-				.onChange(async (value) => {
-					this.plugin.settings.cacheDirPath = value || '.obsidian/cache/mcp-bridge-render';
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName('Cache Size Limit')
-			.setDesc('Maximum cache size in MB (older entries evicted when limit reached)')
-			.addText(text => text
-				.setPlaceholder('100')
-				.setValue(String(this.plugin.settings.cacheMaxSizeMB))
-				.onChange(async (value) => {
-					this.plugin.settings.cacheMaxSizeMB = parseInt(value) || 100;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName('Clear Cache')
-			.setDesc('Delete all cached compiled notes')
-			.addButton(button => button
-				.setButtonText('Clear Cache')
-				.setWarning()
-				.onClick(async () => {
-					await this.plugin.cacheManager.clear();
-					console.log('Cache cleared');
-				}));
-
-		// Cache stats
-		const cacheStats = this.plugin.cacheManager.getStats();
-		const statsDiv = containerEl.createDiv();
-		statsDiv.innerHTML = `
-			<p><strong>Cache Statistics:</strong></p>
-			<ul>
-				<li>Entries: ${cacheStats.entries}</li>
-				<li>Total Size: ${cacheStats.totalSizeMB.toFixed(2)} MB / ${cacheStats.maxSizeMB} MB</li>
-			</ul>
-		`;
-
 		// === Help Text ===
 		containerEl.createEl('h3', { text: 'Quick Setup Guide' });
 
@@ -311,6 +264,73 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 			<p>WebSocket Server: <strong>${this.plugin.isServerRunning() ? '🟢 Running' : '🔴 Stopped'}</strong></p>
 			<p>Listening on: <strong>${this.plugin.settings.host}:${this.plugin.settings.port}</strong></p>
 		`;
+
+		// === Tool Discovery ===
+		containerEl.createEl('h3', { text: 'Tool Discovery' });
+
+		new Setting(containerEl)
+			.setName('Add Tool Search Path')
+			.setDesc('Add a directory to search for custom tool definitions (relative to vault root)')
+			.addText(text => {
+				text.setPlaceholder('_kants/System/mcp');
+				text.inputEl.id = 'mcp-search-path-input';
+			})
+			.addButton(button => button
+				.setButtonText('Add Path')
+				.setCta()
+				.onClick(async () => {
+					const input = document.getElementById('mcp-search-path-input') as HTMLInputElement;
+					const newPath = input.value.trim();
+
+					if (!newPath) {
+						new Notice('Please enter a path');
+						return;
+					}
+
+					if (this.plugin.settings.toolSearchPaths.includes(newPath)) {
+						new Notice('Path already exists');
+						return;
+					}
+
+					this.plugin.settings.toolSearchPaths.push(newPath);
+					await this.plugin.saveSettings();
+					input.value = '';
+					this.display(); // Refresh to show new path
+				}));
+
+		// List existing search paths
+		if (this.plugin.settings.toolSearchPaths.length > 0) {
+			const pathsList = containerEl.createDiv({ cls: 'mcp-search-paths-list' });
+			pathsList.createEl('h4', { text: 'Current Search Paths' });
+
+			for (const searchPath of this.plugin.settings.toolSearchPaths) {
+				new Setting(pathsList)
+					.setName(searchPath)
+					.setDesc(`Path: ${searchPath}`)
+					.addButton(button => button
+						.setButtonText('Remove')
+						.setWarning()
+						.onClick(async () => {
+							this.plugin.settings.toolSearchPaths = this.plugin.settings.toolSearchPaths.filter(p => p !== searchPath);
+							await this.plugin.saveSettings();
+							this.display(); // Refresh to remove from list
+						}));
+			}
+		}
+
+		new Setting(containerEl)
+			.setName('Reload Tools')
+			.setDesc('Reload tool registry to pick up changes from search paths')
+			.addButton(button => button
+				.setButtonText('Reload Tools')
+				.setCta()
+				.onClick(async () => {
+					// Update search paths in registry and reload
+					await this.plugin.toolRegistry.updateSearchPaths(this.plugin.settings.toolSearchPaths);
+					const stats = this.plugin.toolRegistry.getStats();
+					new Notice(`MCP Bridge: Reloaded ${stats.total} tools (${stats.builtin} builtin, ${stats.user} user)`);
+					this.display(); // Refresh to show new tools
+				}));
 
 		// === Custom Tools ===
 		containerEl.createEl('h3', { text: 'Custom Tools' });
@@ -382,6 +402,38 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 			}
 		} else {
 			containerEl.createDiv().setText('No custom tools yet. Click "Add Tool" to create one.');
+		}
+
+		// === All Discovered Tools ===
+		containerEl.createEl('h3', { text: 'All Discovered Tools' });
+
+		const stats = this.plugin.toolRegistry.getStats();
+		const summaryDiv = containerEl.createDiv();
+		summaryDiv.innerHTML = `
+			<p><strong>Total Tools:</strong> ${stats.total} (${stats.builtin} builtin, ${stats.user} user)</p>
+		`;
+
+		const allTools = this.plugin.toolRegistry.getAllTools();
+
+		if (allTools.length > 0) {
+			const allToolsList = containerEl.createDiv({ cls: 'mcp-all-tools-list' });
+
+			for (const tool of allTools) {
+				const isBuiltin = tool.handler === 'builtin';
+				const toolType = isBuiltin ? '🔧 Builtin' : '📦 User';
+				const description = tool.description.split('\n')[0]; // First line only
+				const sourcePath = tool._sourcePath || 'unknown';
+				const descText = isBuiltin
+					? description
+					: `${description}\n📂 Source: ${sourcePath}`;
+
+				new Setting(allToolsList)
+					.setName(`${toolType} - ${tool.name}`)
+					.setDesc(descText)
+					.setClass(isBuiltin ? 'mcp-builtin-tool' : 'mcp-user-tool');
+			}
+		} else {
+			containerEl.createDiv().setText('No tools discovered.');
 		}
 	}
 
