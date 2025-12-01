@@ -1,6 +1,9 @@
-import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, Modal, TextComponent, TextAreaComponent } from 'obsidian';
 import type MCPBridgePlugin from './main';
 import { randomUUID } from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as yaml from 'js-yaml';
 
 export interface MCPBridgeSettings {
 	// Connection settings
@@ -26,6 +29,9 @@ export interface MCPBridgeSettings {
 	// Cache settings
 	cacheDirPath: string;
 	cacheMaxSizeMB: number;
+
+	// Tool discovery settings
+	toolSearchPaths: string[];
 }
 
 export const DEFAULT_SETTINGS: MCPBridgeSettings = {
@@ -41,6 +47,7 @@ export const DEFAULT_SETTINGS: MCPBridgeSettings = {
 	digitalGardenRepoPath: '',
 	cacheDirPath: '.obsidian/cache/mcp-bridge-render',
 	cacheMaxSizeMB: 100,
+	toolSearchPaths: ['.obsidian/mcp-bridge/tools'],
 };
 
 export class MCPBridgeSettingsTab extends PluginSettingTab {
@@ -304,5 +311,373 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 			<p>WebSocket Server: <strong>${this.plugin.isServerRunning() ? '🟢 Running' : '🔴 Stopped'}</strong></p>
 			<p>Listening on: <strong>${this.plugin.settings.host}:${this.plugin.settings.port}</strong></p>
 		`;
+
+		// === Custom Tools ===
+		containerEl.createEl('h3', { text: 'Custom Tools' });
+
+		const userToolsDir = path.join(
+			(this.app.vault.adapter as any).basePath,
+			'.obsidian',
+			'mcp-bridge',
+			'tools'
+		);
+
+		// Load user tools
+		let userTools: any[] = [];
+		if (fs.existsSync(userToolsDir)) {
+			const files = fs.readdirSync(userToolsDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+			userTools = files.map(f => ({
+				filename: f,
+				name: path.basename(f, path.extname(f))
+			}));
+		}
+
+		// Add new tool button
+		new Setting(containerEl)
+			.setName('Add Custom Tool')
+			.setDesc('Create a new custom tool definition or import from YAML file')
+			.addButton(button => button
+				.setButtonText('Add Tool')
+				.setCta()
+				.onClick(() => {
+					new ToolEditorModal(this.app, this.plugin, null, () => {
+						this.display(); // Refresh settings
+					}).open();
+				}))
+			.addButton(button => button
+				.setButtonText('Import Tool')
+				.onClick(() => {
+					this.importTool(userToolsDir);
+				}));
+
+		// List existing tools
+		if (userTools.length > 0) {
+			const toolsList = containerEl.createDiv({ cls: 'mcp-tools-list' });
+			toolsList.createEl('h4', { text: 'Your Custom Tools' });
+
+			for (const tool of userTools) {
+				new Setting(toolsList)
+					.setName(tool.name)
+					.setDesc(`File: ${tool.filename}`)
+					.addButton(button => button
+						.setButtonText('Edit')
+						.onClick(() => {
+							new ToolEditorModal(this.app, this.plugin, tool.filename, () => {
+								this.display(); // Refresh settings
+							}).open();
+						}))
+					.addButton(button => button
+						.setButtonText('Delete')
+						.setWarning()
+						.onClick(() => {
+							const confirmed = confirm(`Are you sure you want to delete ${tool.name}?`);
+							if (confirmed) {
+								const filePath = path.join(userToolsDir, tool.filename);
+								fs.unlinkSync(filePath);
+								new Notice(`Tool ${tool.name} deleted`);
+								this.plugin.toolRegistry.reload();
+								this.display(); // Refresh settings
+							}
+						}));
+			}
+		} else {
+			containerEl.createDiv().setText('No custom tools yet. Click "Add Tool" to create one.');
+		}
+	}
+
+	/**
+	 * Import a tool from a YAML file
+	 */
+	private async importTool(userToolsDir: string): Promise<void> {
+		// Create file input element
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.accept = '.yaml,.yml';
+
+		input.onchange = async (e: Event) => {
+			const file = (e.target as HTMLInputElement).files?.[0];
+			if (!file) return;
+
+			try {
+				// Read file contents
+				const content = await file.text();
+				const toolDef: any = yaml.load(content);
+
+				// Validate required fields
+				if (!toolDef || typeof toolDef !== 'object') {
+					new Notice('Invalid YAML file');
+					return;
+				}
+
+				if (!toolDef.name || !toolDef.description || !toolDef.handler || !toolDef.inputSchema) {
+					new Notice('Invalid tool definition - missing required fields (name, description, handler, inputSchema)');
+					return;
+				}
+
+				// Ensure directory exists
+				if (!fs.existsSync(userToolsDir)) {
+					fs.mkdirSync(userToolsDir, { recursive: true });
+				}
+
+				// Check if tool already exists
+				const filename = `${toolDef.name}.yaml`;
+				const filePath = path.join(userToolsDir, filename);
+
+				if (fs.existsSync(filePath)) {
+					const overwrite = confirm(`Tool "${toolDef.name}" already exists. Overwrite?`);
+					if (!overwrite) return;
+				}
+
+				// Save the tool
+				fs.writeFileSync(filePath, yaml.dump(toolDef, { indent: 2 }));
+				new Notice(`Tool "${toolDef.name}" imported successfully`);
+
+				// Reload tool registry
+				await this.plugin.toolRegistry.reload();
+
+				// Refresh settings display
+				this.display();
+			} catch (error) {
+				new Notice(`Failed to import tool: ${error.message}`);
+				console.error('Error importing tool:', error);
+			}
+		};
+
+		// Trigger file picker
+		input.click();
+	}
+}
+
+/**
+ * Modal for adding/editing custom tools
+ */
+class ToolEditorModal extends Modal {
+	plugin: MCPBridgePlugin;
+	filename: string | null;
+	onSave: () => void;
+	toolData: any;
+
+	constructor(app: App, plugin: MCPBridgePlugin, filename: string | null, onSave: () => void) {
+		super(app);
+		this.plugin = plugin;
+		this.filename = filename;
+		this.onSave = onSave;
+		this.toolData = this.loadTool();
+	}
+
+	private loadTool(): any {
+		if (!this.filename) {
+			// New tool - return defaults
+			return {
+				name: '',
+				description: '',
+				handler: '',
+				category: 'custom',
+				tags: [],
+				inputSchema: {
+					type: 'object',
+					properties: {},
+					required: []
+				},
+				outputSchema: null
+			};
+		}
+
+		// Load existing tool
+		const userToolsDir = path.join(
+			(this.app.vault.adapter as any).basePath,
+			'.obsidian',
+			'mcp-bridge',
+			'tools'
+		);
+		const filePath = path.join(userToolsDir, this.filename);
+		const content = fs.readFileSync(filePath, 'utf8');
+		return yaml.load(content);
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+
+		contentEl.createEl('h2', { text: this.filename ? 'Edit Tool' : 'Add New Tool' });
+
+		// Tool Name
+		new Setting(contentEl)
+			.setName('Tool Name')
+			.setDesc('Unique identifier for the tool (lowercase, underscores allowed)')
+			.addText(text => text
+				.setPlaceholder('my_custom_tool')
+				.setValue(this.toolData.name)
+				.onChange(value => {
+					this.toolData.name = value;
+				}));
+
+		// Description
+		new Setting(contentEl)
+			.setName('Description')
+			.setDesc('Clear description of what the tool does')
+			.addTextArea(text => {
+				text.setPlaceholder('Does something useful...')
+					.setValue(this.toolData.description)
+					.onChange(value => {
+						this.toolData.description = value;
+					});
+				text.inputEl.rows = 3;
+			});
+
+		// Handler Path
+		new Setting(contentEl)
+			.setName('Handler Path')
+			.setDesc('Path to the JavaScript handler file (can be vault-relative or absolute)')
+			.addText(text => text
+				.setPlaceholder('_kants/System/src/my_handler.js')
+				.setValue(this.toolData.handler)
+				.onChange(value => {
+					this.toolData.handler = value;
+				}));
+
+		// Category
+		new Setting(contentEl)
+			.setName('Category')
+			.setDesc('Tool category (e.g., custom, automation, helper)')
+			.addText(text => text
+				.setPlaceholder('custom')
+				.setValue(this.toolData.category || 'custom')
+				.onChange(value => {
+					this.toolData.category = value;
+				}));
+
+		// Tags
+		new Setting(contentEl)
+			.setName('Tags')
+			.setDesc('Comma-separated tags')
+			.addText(text => text
+				.setPlaceholder('automation, helper')
+				.setValue((this.toolData.tags || []).join(', '))
+				.onChange(value => {
+					this.toolData.tags = value.split(',').map(t => t.trim()).filter(t => t);
+				}));
+
+		// Input Schema (YAML)
+		new Setting(contentEl)
+			.setName('Input Schema (YAML)')
+			.setDesc('JSON Schema for tool inputs')
+			.addTextArea(text => {
+				text.setPlaceholder('type: object\nproperties:\n  input:\n    type: string')
+					.setValue(yaml.dump(this.toolData.inputSchema))
+					.onChange(value => {
+						try {
+							this.toolData.inputSchema = yaml.load(value);
+						} catch (e) {
+							// Invalid YAML, keep old value
+						}
+					});
+				text.inputEl.rows = 8;
+				text.inputEl.style.fontFamily = 'monospace';
+			});
+
+		// Output Schema (YAML, optional)
+		new Setting(contentEl)
+			.setName('Output Schema (YAML) - Optional')
+			.setDesc('JSON Schema for tool outputs')
+			.addTextArea(text => {
+				text.setPlaceholder('type: object\nproperties:\n  result:\n    type: string')
+					.setValue(this.toolData.outputSchema ? yaml.dump(this.toolData.outputSchema) : '')
+					.onChange(value => {
+						if (value.trim()) {
+							try {
+								this.toolData.outputSchema = yaml.load(value);
+							} catch (e) {
+								// Invalid YAML, keep old value
+							}
+						} else {
+							this.toolData.outputSchema = null;
+						}
+					});
+				text.inputEl.rows = 8;
+				text.inputEl.style.fontFamily = 'monospace';
+			});
+
+		// Save/Cancel buttons
+		const buttonContainer = contentEl.createDiv({ cls: 'modal-button-container' });
+		buttonContainer.style.display = 'flex';
+		buttonContainer.style.justifyContent = 'flex-end';
+		buttonContainer.style.gap = '10px';
+		buttonContainer.style.marginTop = '20px';
+
+		const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
+		cancelButton.onclick = () => this.close();
+
+		const saveButton = buttonContainer.createEl('button', { text: 'Save', cls: 'mod-cta' });
+		saveButton.onclick = () => this.saveTool();
+	}
+
+	private saveTool() {
+		// Validate required fields
+		if (!this.toolData.name) {
+			new Notice('Tool name is required');
+			return;
+		}
+		if (!this.toolData.description) {
+			new Notice('Description is required');
+			return;
+		}
+		if (!this.toolData.handler) {
+			new Notice('Handler path is required');
+			return;
+		}
+
+		const userToolsDir = path.join(
+			(this.app.vault.adapter as any).basePath,
+			'.obsidian',
+			'mcp-bridge',
+			'tools'
+		);
+
+		// Ensure directory exists
+		if (!fs.existsSync(userToolsDir)) {
+			fs.mkdirSync(userToolsDir, { recursive: true });
+		}
+
+		// Determine filename
+		const filename = this.filename || `${this.toolData.name}.yaml`;
+		const filePath = path.join(userToolsDir, filename);
+
+		// Build final YAML structure
+		const toolYaml: any = {
+			name: this.toolData.name,
+			description: this.toolData.description,
+			handler: this.toolData.handler,
+			category: this.toolData.category,
+			inputSchema: this.toolData.inputSchema
+		};
+
+		if (this.toolData.tags && this.toolData.tags.length > 0) {
+			toolYaml.tags = this.toolData.tags;
+		}
+
+		if (this.toolData.outputSchema) {
+			toolYaml.outputSchema = this.toolData.outputSchema;
+		}
+
+		// Write to file
+		try {
+			fs.writeFileSync(filePath, yaml.dump(toolYaml, { indent: 2 }));
+			new Notice(`Tool ${this.toolData.name} saved successfully`);
+
+			// Reload tool registry
+			this.plugin.toolRegistry.reload();
+
+			this.onSave();
+			this.close();
+		} catch (error) {
+			new Notice(`Failed to save tool: ${error.message}`);
+			console.error('Error saving tool:', error);
+		}
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
 	}
 }

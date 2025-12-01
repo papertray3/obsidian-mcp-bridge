@@ -3,6 +3,9 @@
 /main.js.map
 *.js.map
 
+# Generated MCP config
+/mcp-bridge/generated/
+
 # Dependencies
 /node_modules/
 
@@ -25,3 +28,8 @@ Thumbs.db
 
 # Test outputs
 /test-outputs/
+
+# Configuration files with secrets
+data.json
+.env
+.env.local

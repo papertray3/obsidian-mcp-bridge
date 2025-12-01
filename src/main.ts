@@ -6,12 +6,14 @@ import { ToolRegistry } from './tool-registry';
 import * as path from 'path';
 import { RenderedContentCacheManager, CacheSettings } from './cache-manager';
 import { runDataviewBlock, extractDataviewBlocks } from './handlers/dataview-block';
+import { MetadataExtractor } from './metadata-extractor';
 
 export default class MCPBridgePlugin extends Plugin {
 	settings: MCPBridgeSettings;
 	server: MCPWebSocketServer;
 	toolRegistry: ToolRegistry;
 	cacheManager: RenderedContentCacheManager;
+	metadataExtractor: MetadataExtractor;
 
 	async onload() {
 		await this.loadSettings();
@@ -24,6 +26,13 @@ export default class MCPBridgePlugin extends Plugin {
 			maxSizeMB: this.settings.cacheMaxSizeMB
 		};
 		this.cacheManager = new RenderedContentCacheManager(this.app.vault, cacheSettings);
+
+		// Initialize metadata extractor
+		this.metadataExtractor = new MetadataExtractor(
+			this.app,
+			this.app.metadataCache,
+			this.app.vault
+		);
 
 		// Generate API key if not set
 		if (!this.settings.apiKey) {
@@ -134,54 +143,97 @@ export default class MCPBridgePlugin extends Plugin {
 		const { method, params = {} } = request;
 
 		console.log(`MCP Bridge: Handling request: ${method}`, params);
+		console.log(`MCP Bridge: Method name length: ${method.length}, method bytes: ${method.split('').map(c => c.charCodeAt(0)).join(',')}`);
 
-		// Check if this is a tool in the registry
-		const tool = this.toolRegistry.getTool(method);
+		try {
+			// Check if this is a tool in the registry
+			console.log(`MCP Bridge: Checking if '${method}' is a registered tool...`);
+			const tool = this.toolRegistry.getTool(method);
 
-		if (tool) {
-			// Route to appropriate handler
-			if (tool.handler === 'builtin') {
-				return this.handleBuiltinTool(method, params);
-			} else {
-				// Execute user script
-				return await this.toolRegistry.executeTool(method, params);
+			if (tool) {
+				console.log(`MCP Bridge: Found tool '${method}', handler type: ${tool.handler}`);
+				// Route to appropriate handler
+				if (tool.handler === 'builtin') {
+					return this.handleBuiltinTool(method, params);
+				} else {
+					// Execute user script
+					return await this.toolRegistry.executeTool(method, params);
+				}
 			}
-		}
 
-		// Fallback for special methods
-		switch (method) {
-			case 'ping':
-				return {
-					status: 'ok',
-					timestamp: Date.now(),
-					version: '2.0.0-extensible'
-				};
+			console.log(`MCP Bridge: '${method}' not a tool, checking fallback methods...`);
+			console.log(`MCP Bridge: Method string comparison - is it 'tools/list'? ${method === 'tools/list'}`);
+			console.log(`MCP Bridge: Method string comparison - is it 'ping'? ${method === 'ping'}`);
 
-			case 'broadcast':
-				this.server.broadcast({
-					type: params.type || 'event',
-					timestamp: Date.now(),
-					...params
-				});
-				return {
-					status: 'broadcast_sent',
-					clients: this.server['clients'].size
-				};
+			// Fallback for special methods
+			console.log(`MCP Bridge: About to switch on method: '${method}' (type: ${typeof method})`);
+			switch (method) {
+				case 'ping':
+					console.log(`MCP Bridge: Handling ping request`);
+					return {
+						status: 'ok',
+						timestamp: Date.now(),
+						version: '2.0.0-extensible'
+					};
 
-			case 'tools/list':
-				// Return all available tools
-				return {
-					tools: this.toolRegistry.getAllTools().map(t => ({
-						name: t.name,
-						description: t.description,
-						inputSchema: t.inputSchema,
-						category: t.category,
-						tags: t.tags
-					}))
-				};
+				case 'broadcast':
+					this.server.broadcast({
+						type: params.type || 'event',
+						timestamp: Date.now(),
+						...params
+					});
+					return {
+						status: 'broadcast_sent',
+						clients: this.server['clients'].size
+					};
 
-			default:
-				throw new Error(`Unknown method: ${method}`);
+				case 'tools/list':
+					// Return all available tools
+					console.log(`MCP Bridge: Matched tools/list case`);
+					try {
+						console.log(`MCP Bridge: Listing tools...`);
+						const allTools = this.toolRegistry?.getAllTools() || [];
+						console.log(`MCP Bridge: Found ${allTools.length} tools`);
+						
+						// Build response incrementally to avoid blocking
+						const toolsArray: any[] = [];
+						for (const t of allTools) {
+							const toolDef = {
+								name: t.name,
+								description: t.description,
+								inputSchema: t.inputSchema,
+								...(t.outputSchema && { outputSchema: t.outputSchema }),
+								...(t.category && { category: t.category }),
+								...(t.tags && { tags: t.tags })
+							};
+							
+							// Log first tool to debug schema format
+							if (toolsArray.length === 0) {
+								console.log(`MCP Bridge: First tool schema:`, JSON.stringify(toolDef, null, 2));
+							}
+							
+							toolsArray.push(toolDef);
+						}
+						
+						console.log(`MCP Bridge: Returning ${toolsArray.length} tools with schemas`);
+						return {
+							tools: toolsArray
+						};
+					} catch (error) {
+						console.error('Error listing tools:', error);
+						return {
+							tools: [],
+							error: `Failed to list tools: ${error instanceof Error ? error.message : 'Unknown error'}`
+						};
+					}
+
+				default:
+					console.log(`MCP Bridge: Unknown method: '${method}'`);
+					throw new Error(`Unknown method: ${method}`);
+			}
+		} catch (error) {
+			console.error(`MCP Bridge: Error in handleRequest for '${method}':`, error);
+			throw error;
 		}
 	}
 
@@ -202,6 +254,15 @@ export default class MCPBridgePlugin extends Plugin {
 
 			case 'get_note_raw':
 				return this.getNoteRaw(params);
+
+			case 'get_note_metadata':
+				return this.getNoteMetadata(params);
+
+			case 'get_note_links':
+				return this.getNoteLinks(params);
+
+			case 'resolve_wiki_links':
+				return this.resolveWikiLinks(params);
 
 			case 'list_vault_files':
 				return this.listVaultFiles(params);
@@ -241,7 +302,7 @@ export default class MCPBridgePlugin extends Plugin {
 	/**
 	 * Built-in: Get raw markdown content of a note
 	 */
-	private async getNoteRaw(params: { filepath: string }): Promise<any> {
+	private async getNoteRaw(params: { filepath: string }): Promise<string> {
 		const { filepath } = params;
 
 		const file = this.app.vault.getAbstractFileByPath(filepath);
@@ -251,11 +312,7 @@ export default class MCPBridgePlugin extends Plugin {
 
 		const content = await this.app.vault.read(file);
 
-		return {
-			filepath: filepath,
-			content: content,
-			size: content.length
-		};
+		return content;
 	}
 
 	/**
@@ -284,6 +341,93 @@ export default class MCPBridgePlugin extends Plugin {
 					size: f.stat.size
 				}
 			}))
+		};
+	}
+
+	/**
+	 * Built-in: Get structured metadata for a note
+	 */
+	private async getNoteMetadata(params: {
+		filepath: string;
+		includeLinks?: boolean;
+		includeBacklinks?: boolean;
+		maxLinks?: number;
+		resolvePaths?: boolean;
+	}): Promise<any> {
+		const { filepath, includeLinks, includeBacklinks, maxLinks, resolvePaths } = params;
+
+		const file = this.app.vault.getAbstractFileByPath(filepath);
+		if (!file || !(file instanceof TFile)) {
+			throw new Error(`File not found: ${filepath}`);
+		}
+
+		const metadata = await this.metadataExtractor.extractNoteMetadata(file, {
+			includeLinks,
+			includeBacklinks,
+			maxLinks,
+			resolvePaths
+		});
+
+		return metadata;
+	}
+
+	/**
+	 * Built-in: Get paginated links (outgoing and backlinks) for a note
+	 */
+	private async getNoteLinks(params: {
+		filepath: string;
+		includeOutgoing?: boolean;
+		includeBacklinks?: boolean;
+		resolvePaths?: boolean;
+		limit?: number;
+		offset?: number;
+	}): Promise<any> {
+		const {
+			filepath,
+			includeOutgoing = true,
+			includeBacklinks = true,
+			resolvePaths = true,
+			limit = 100,
+			offset = 0
+		} = params;
+
+		const file = this.app.vault.getAbstractFileByPath(filepath);
+		if (!file || !(file instanceof TFile)) {
+			throw new Error(`File not found: ${filepath}`);
+		}
+
+		const links = await this.metadataExtractor.getPaginatedLinks(file, {
+			includeOutgoing,
+			includeBacklinks,
+			resolvePaths,
+			limit,
+			offset
+		});
+
+		return {
+			filepath,
+			...links
+		};
+	}
+
+	/**
+	 * Built-in: Resolve wiki links to file paths (batch operation)
+	 */
+	private async resolveWikiLinks(params: {
+		links: string[];
+		sourcePath?: string;
+	}): Promise<any> {
+		const { links, sourcePath = '' } = params;
+
+		if (!Array.isArray(links)) {
+			throw new Error('links parameter must be an array');
+		}
+
+		const resolved = await this.metadataExtractor.resolveWikiLinks(links, sourcePath);
+
+		return {
+			count: links.length,
+			resolved
 		};
 	}
 

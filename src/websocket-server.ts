@@ -101,7 +101,9 @@ export class MCPWebSocketServer {
 		ws.onmessage = async (msg) => {
 			let request: MCPRequest | undefined;
 			try {
+				console.log('MCP Bridge: WebSocket message received');
 				request = JSON.parse(msg.data) as MCPRequest;
+				console.log(`MCP Bridge: Parsed request: ${request.method}`);
 
 				// Authenticate
 				if (this.plugin.settings.requireAuth) {
@@ -116,12 +118,16 @@ export class MCPWebSocketServer {
 				}
 
 				// Handle request
+				console.log(`MCP Bridge: About to call handleRequest for ${request.method}`);
 				const result = await this.plugin.handleRequest(request);
+				console.log(`MCP Bridge: handleRequest returned for ${request.method}`);
 				const response: MCPResponse = {
 					result,
 					id: request.id
 				};
+				console.log(`MCP Bridge: About to send response for ${request.method}`);
 				ws.send(JSON.stringify(response));
+				console.log(`MCP Bridge: Response sent for ${request.method}`);
 
 			} catch (error) {
 				console.error('MCP Bridge: Request handling error:', error);

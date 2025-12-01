@@ -1,0 +1,241 @@
+version: "2.0"
+
+config:
+  auto_reload: true                  # Watch for file changes
+  sandbox_user_scripts: true         # Run user scripts in sandbox
+  enable_auto_generation: false      # Phase III: auto-gen from classes
+
+tools:
+  # Built-in tools (part of plugin core)
+  builtin:
+    - name: ping
+      description: Test connectivity to the MCP Bridge
+      handler: builtin
+      inputSchema:
+        type: object
+        properties: {}
+      outputSchema:
+        type: object
+        properties:
+          status:
+            type: string
+          timestamp:
+            type: number
+          version:
+            type: string
+
+    - name: search_files
+      description: Search for files in the vault using glob patterns
+      handler: builtin
+      category: search
+      inputSchema:
+        type: object
+        properties:
+          pattern:
+            type: string
+            description: Glob pattern to match (e.g., "*.md", "Notes/**/*.md")
+        required: [pattern]
+      outputSchema:
+        type: object
+        properties:
+          files:
+            type: array
+            items:
+              type: string
+
+    - name: get_note_raw
+      description: Get raw markdown content of a note
+      handler: builtin
+      category: notes
+      inputSchema:
+        type: object
+        properties:
+          filepath:
+            type: string
+            description: Path to note relative to vault root
+        required: [filepath]
+      outputSchema:
+        type: object
+        properties:
+          filepath:
+            type: string
+          content:
+            type: string
+
+    - name: get_note_metadata
+      description: Get structured metadata for a note - frontmatter, tags, links, backlinks, headings, stats. Returns parsed JSON, no manual parsing needed. Use with get_note_raw() for complete note understanding.
+      handler: builtin
+      category: metadata
+      tags: [frontmatter, links, tags, structure]
+      inputSchema:
+        type: object
+        properties:
+          filepath:
+            type: string
+            description: Path to note relative to vault root
+          includeLinks:
+            type: boolean
+            description: Include outgoing links (default false)
+          includeBacklinks:
+            type: boolean
+            description: Include backlinks (default false)
+          maxLinks:
+            type: number
+            description: Maximum number of links to include (default unlimited)
+          resolvePaths:
+            type: boolean
+            description: Resolve wiki links to file paths (default false)
+        required: [filepath]
+
+    - name: get_note_links
+      description: Get paginated outgoing and incoming links for a note with path resolution. Supports pagination for large link graphs. If hasMore=true, call again with nextOffset.
+      handler: builtin
+      category: metadata
+      tags: [links, backlinks, pagination, graph]
+      inputSchema:
+        type: object
+        properties:
+          filepath:
+            type: string
+            description: Path to note relative to vault root
+          includeOutgoing:
+            type: boolean
+            description: Include outgoing links (default true)
+          includeBacklinks:
+            type: boolean
+            description: Include backlinks (default true)
+          resolvePaths:
+            type: boolean
+            description: Resolve wiki links to file paths (default true)
+          limit:
+            type: number
+            description: Maximum number of links per type to return (default 100)
+          offset:
+            type: number
+            description: Number of links to skip for pagination (default 0)
+        required: [filepath]
+
+    - name: resolve_wiki_links
+      description: Batch resolve wiki links to file paths and check existence. Automatically matches against both filenames and note aliases in frontmatter. Efficient for validating multiple links at once.
+      handler: builtin
+      category: metadata
+      tags: [links, validation, resolution, aliases]
+      inputSchema:
+        type: object
+        properties:
+          links:
+            type: array
+            items:
+              type: string
+            description: Array of wiki link texts (without brackets)
+          sourcePath:
+            type: string
+            description: Optional source note path for relative link resolution
+        required: [links]
+      outputSchema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                link:
+                  type: string
+                resolvedPath:
+                  type: string
+                exists:
+                  type: boolean
+                matchType:
+                  type: string
+                  enum: [filename, alias]
+                  description: How the link was matched (filename or alias in frontmatter)
+
+    - name: list_vault_files
+      description: List all markdown files in the vault or a specific folder
+      handler: builtin
+      category: notes
+      inputSchema:
+        type: object
+        properties:
+          folder:
+            type: string
+            description: Optional folder to list files from (relative to vault root)
+      outputSchema:
+        type: object
+        properties:
+          files:
+            type: array
+            items:
+              type: object
+
+    - name: run_dataview_block
+      description: Execute a Dataview or DataviewJS query block and return rendered results
+      handler: builtin
+      category: dataview
+      inputSchema:
+        type: object
+        properties:
+          flavor:
+            type: string
+            enum: [dataview, dataviewjs]
+            description: Type of query - 'dataview' for DQL or 'dataviewjs' for JavaScript
+          source:
+            type: string
+            description: The query or script source code (without the ```dataview wrapper)
+          filepath:
+            type: string
+            description: Optional path to note file to use as execution context (for this.file, dv.current(), etc.)
+          input:
+            description: Optional input data to pass to DataviewJS scripts (available as 'input' variable)
+        required: [flavor, source]
+      outputSchema:
+        type: object
+        properties:
+          success:
+            type: boolean
+          renderedMarkdown:
+            type: string
+          renderedHtml:
+            type: string
+          elapsedMs:
+            type: number
+          errors:
+            type: array
+            items:
+              type: string
+
+    - name: extract_dataview_blocks
+      description: Extract all Dataview and DataviewJS blocks from a note with their source code, type, and line numbers
+      handler: builtin
+      category: dataview
+      inputSchema:
+        type: object
+        properties:
+          filepath:
+            type: string
+            description: Path to the note file (relative to vault root)
+        required: [filepath]
+      outputSchema:
+        type: object
+        properties:
+          success:
+            type: boolean
+          blocks:
+            type: array
+            items:
+              type: object
+              properties:
+                flavor:
+                  type: string
+                  enum: [dataview, dataviewjs]
+                source:
+                  type: string
+                lineStart:
+                  type: number
+                lineEnd:
+                  type: number
+          errors:
+            type: array
+            items:
+              type: string
