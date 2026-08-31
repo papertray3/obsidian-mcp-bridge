@@ -2,7 +2,7 @@ version: "2.0"
 
 config:
   auto_reload: true                  # Watch for file changes
-  sandbox_user_scripts: true         # Run user scripts in sandbox
+  sandbox_user_scripts: true         # Reserved for future use - currently has no effect (see docs/architecture/extensibility.md#security--sandboxing)
   enable_auto_generation: false      # Phase III: auto-gen from classes
 
 tools:

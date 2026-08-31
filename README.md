@@ -241,19 +241,12 @@ tools:
 
 ### Current (Localhost Only)
 - WebSocket binds to `127.0.0.1` only
-- API key authentication
-- No SSL needed (local traffic)
-- User scripts run with access to Obsidian API only
+- API key authentication controls who can invoke tools over the WebSocket connection
 
-### Sandboxing
-User handler scripts have access to:
-- ✅ Obsidian API (`app`, `vault`, `workspace`)
-- ✅ Plugin APIs (Dataview, Metadata Menu, etc.)
-- ❌ Node.js file system (`fs`, `path`)
-- ❌ Network requests (`http`, `https`, `fetch`)
-- ❌ Process spawning (`child_process`)
+### No sandboxing for handler scripts
+User handler scripts run with **full, unrestricted Node.js access** - the same privileges as the plugin itself (`fs`, `child_process`, network requests, arbitrary `require()`, the works). There is no sandbox, and the `sandbox_user_scripts` config flag does nothing. Only add handler scripts from sources you trust, exactly as you would an Obsidian community plugin.
 
-See [Extensibility Guide - Security](docs/architecture/extensibility.md#security--sandboxing) for details.
+See [Extensibility Guide - Security & Sandboxing](docs/architecture/extensibility.md#security--sandboxing) for the full picture.
 
 ## License
 

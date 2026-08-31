@@ -56,8 +56,8 @@ The MCP Bridge plugin uses a **YAML-driven tool registry** as the single source 
 │  ┌────────────────────────────────────────────────────┐ │
 │  │          Handler Loader                            │ │
 │  │  • Loads builtin handlers (in plugin)             │ │
-│  │  • Loads user handlers (from vault)               │ │
-│  │  • Sandboxes scripts                              │ │
+│  │  • Loads user handlers (from vault, via require()) │ │
+│  │  • No sandboxing - see Security & Sandboxing below │ │
 │  └────────────────────────────────────────────────────┘ │
 │                          ↓                               │
 │  ┌────────────────────────────────────────────────────┐ │
@@ -121,7 +121,7 @@ version: 2.0
 config:
   # Global settings
   auto_reload: true                # Watch for file changes
-  sandbox_user_scripts: true       # Run user scripts in sandbox
+  sandbox_user_scripts: true       # Reserved for future use - currently has no effect, see Security & Sandboxing
   enable_auto_generation: false    # Phase 2: auto-gen from classes
 
 tools:
@@ -253,30 +253,27 @@ module.exports = {
 
 ### Context Object
 
-The `context` parameter provides access to Obsidian APIs:
+The `context` parameter provides access to Obsidian APIs. This mirrors the real `HandlerContext` shape built by `ToolRegistry.createContext()` in `src/tool-registry.ts`:
 
 ```javascript
 const context = {
-  app: this.app,                    // Obsidian App instance
-  vault: this.app.vault,            // Vault API (read/write files)
-  workspace: this.app.workspace,    // Workspace API (UI, tabs, etc.)
-  metadataCache: this.app.metadataCache,  // Metadata cache (frontmatter, links)
-  fileManager: this.app.fileManager,      // File operations
+  app,             // Obsidian App instance
+  vault,           // Vault API (read/write files)
+  workspace,       // Workspace API (UI, tabs, etc.)
+  metadataCache,   // Metadata cache (frontmatter, links)
+  fileManager,     // File operations
 
-  // Access to other plugins (if installed)
+  // Other installed plugins, keyed by plugin id - only entries for plugins
+  // that are actually installed and enabled are present. Currently allow-listed:
+  // 'dataview', 'metadata-menu', 'smart-connections', 'digital-garden', 'templater'.
   plugins: {
-    dataview: this.app.plugins.plugins['dataview'],
-    metadataMenu: this.app.plugins.plugins['metadata-menu'],
-    // ... etc.
+    dataview: app.plugins.plugins['dataview'],
+    // ... etc, only if installed
   },
-
-  // Utility functions
-  utils: {
-    sanitizePath: (path) => { /* ... */ },
-    formatDate: (date) => { /* ... */ },
-  }
 };
 ```
+
+There is no `context.utils` helper object - handlers that need path sanitization, date formatting, or similar should bring their own logic (or, as noted in [Security & Sandboxing](#security--sandboxing), `require()` whatever they need directly).
 
 ### Example: Simple Handler
 
@@ -475,40 +472,32 @@ user:
 
 ## Security & Sandboxing
 
-### Sandbox Mode
+### There is no sandbox
 
-User scripts run in a **restricted sandbox** that:
+**User handler scripts run with the same privileges as the plugin itself - full Node.js access, unrestricted.** They are loaded with a plain CommonJS `require()` call (see `ToolRegistry.loadHandlers()` in `src/tool-registry.ts`), not inside a VM, worker thread, or any other isolation boundary. A handler script can, without restriction:
 
-✅ **Allows:**
-- Access to Obsidian API (`app`, `vault`, `workspace`)
-- Reading and writing files in the vault
-- Accessing other plugins' APIs
-- Executing async operations
+- `require('fs')`, `require('child_process')`, `require('http')` - or any other Node.js built-in or installed npm package reachable from its location
+- Read, write, or delete **any file the Obsidian process can reach**, not just files inside the vault
+- Make arbitrary outbound network requests
+- Spawn processes
 
-❌ **Blocks:**
-- File system access outside vault (`fs`, `path`, etc.)
-- Network requests (`http`, `https`, `fetch`)
-- Process spawning (`child_process`, `exec`)
-- Require arbitrary modules (`require('anything')`)
+The `config.sandbox_user_scripts` field in `tools.yaml` **does nothing**. It is not read anywhere in the codebase - setting it to `false` has no effect, because there is no restriction for it to lift. Treat it as reserved/aspirational, not as an active setting, until this doc says otherwise.
 
-### Trusted Mode (Advanced)
+### What this means for you
 
-If you need full Node.js access (e.g., for external APIs), you can disable sandboxing:
-
-```yaml
-config:
-  sandbox_user_scripts: false  # ⚠️ Use with caution!
-```
-
-⚠️ **Warning:** Disabling sandbox allows scripts full system access. Only do this if you trust all scripts in `handlers/user/`.
+Adding a handler script to `handlers/user/` is exactly as trusting as installing any other Obsidian community plugin, or any VS Code extension: the code runs with your full user-level permissions. The plugin's WebSocket API-key authentication controls **who can invoke a tool over the network** - it is a separate boundary from **what an installed handler is allowed to do once invoked**, and it provides no protection against a malicious or buggy handler script.
 
 ### Best Practices
 
-1. **Review scripts before adding them** - Don't blindly copy/paste code
-2. **Keep sandbox enabled** - Unless you specifically need external access
-3. **Version control your handlers** - Track changes to user scripts
-4. **Test with non-critical vaults first** - Before using in production
-5. **Use plugin APIs when possible** - Instead of direct file system access
+Given the above, these aren't optional hardening tips - they're the only protection you currently have:
+
+1. **Review every handler script before adding it** - read the whole file; don't copy/paste code you haven't inspected
+2. **Only add handlers from sources you trust** - the same bar you'd apply to installing a plugin
+3. **Version control your handlers** - so you can see exactly what changed and when
+4. **Test with a non-critical vault first** - before pointing a new handler at data you care about
+5. **Prefer the provided Obsidian APIs** (`context.vault`, `context.app`, etc.) over reaching for `fs`/`child_process` directly - not because it's enforced, but because it keeps your handler's blast radius small and its behavior predictable
+
+If real sandboxing (a VM, a worker thread with a restricted API surface, or similar) gets implemented in a future phase, this section will be updated to describe the actual enforced boundary - see the [phased refactoring notes](../development/eval-20260831.md) for where that sits in the roadmap.
 
 ---
 
@@ -826,13 +815,9 @@ This will be implemented in a future update. For now, you can create similar too
 3. Manually reload: "MCP Bridge: Reload Tool Registry"
 4. Restart Obsidian if issues persist
 
-### Sandbox restrictions
+### "Module not found" errors
 
-If you get "module not found" or "require is not defined":
-
-1. Check if you're trying to use Node.js modules (not allowed in sandbox)
-2. Use Obsidian APIs instead: `context.vault`, `context.app`, etc.
-3. If you really need Node.js access, disable sandbox (see Security section)
+`require()` in a handler script is real Node.js `require` (see [Security & Sandboxing](#security--sandboxing) - there is no sandbox restricting it), so a "module not found" error means exactly what it says: the module isn't installed anywhere `require()`'s normal resolution can find it. Either install it (e.g. as a dependency alongside the handler) or use the equivalent Obsidian API (`context.vault`, `context.app`, etc.) instead.
 
 ---
 
