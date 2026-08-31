@@ -14,6 +14,7 @@ This document describes how to extend the MCP Bridge plugin with custom tools wi
 - [File Structure](#file-structure)
 - [YAML Schema Format](#yaml-schema-format)
 - [Handler Scripts](#handler-scripts)
+  - [Handler Path Resolution](#handler-path-resolution)
 - [Adding Custom Tools](#adding-custom-tools)
 - [Built-in vs User Tools](#built-in-vs-user-tools)
 - [Security & Sandboxing](#security--sandboxing)
@@ -83,31 +84,25 @@ The MCP Bridge plugin uses a **YAML-driven tool registry** as the single source 
 
 ## File Structure
 
+Built-in tools are defined in the plugin's own `mcp-bridge/defaults/tools.defaults.yaml` and implemented in plugin code (`handler: builtin`) - you never touch these directly.
+
+User tools are discovered by scanning every directory listed in the plugin's **tool search paths** setting (configurable in Obsidian Settings → MCP Bridge → Tool Discovery) for `.yaml`/`.yml` files, one tool definition per file. Each search path directory is independent and can live anywhere - inside the vault, inside another plugin's folder, wherever is convenient:
+
 ```
-YourVault/
-└── .obsidian/
-    └── plugins/
-        └── mcp-bridge/
-            ├── tools.yaml              # Master tool registry (user-editable)
-            ├── handlers/
-            │   ├── core/               # Built-in handlers (part of plugin)
-            │   │   ├── search_files.js
-            │   │   ├── get_note.js
-            │   │   └── list_vault.js
-            │   └── user/               # User-added handlers
-            │       ├── my_tool.js
-            │       └── analysis.js
-            └── generated/
-                ├── mcp-config.json     # Auto-generated MCP server config
-                └── tool-registry.json  # Auto-generated registry cache
+<a configured tool search path>/
+├── my_tool.yaml           # Tool definition
+├── my_tool.js             # Its handler - see "Handler Path Resolution" below
+├── another_tool.yaml
+└── another_tool.js
 ```
 
-**Key Files:**
+Tools added via the "Custom Tools" section of plugin settings are written to `.obsidian/mcp-bridge/tools/` in the vault - which only becomes a real search path if it's also listed under Tool Discovery (it is by default).
 
-- **`tools.yaml`** - Single source of truth, defines all tools
-- **`handlers/core/`** - Built-in handlers (shipped with plugin)
-- **`handlers/user/`** - User-created handlers (you add these!)
-- **`generated/`** - Auto-generated files (don't edit manually)
+**Key locations:**
+
+- **`mcp-bridge/defaults/tools.defaults.yaml`** (plugin dir) - built-in tool definitions, shipped with the plugin
+- **Configured tool search paths** - where user tool `.yaml` + handler `.js` pairs live (see below)
+- **`mcp-bridge/generated/mcp-config.json`** (plugin dir) - auto-generated MCP server config; don't edit manually
 
 ---
 
@@ -153,7 +148,7 @@ tools:
   user:
     - name: my_custom_tool
       description: A custom tool I created
-      handler: user/my_tool.js       # Path relative to handlers/
+      handler: my_tool.js            # Path relative to this YAML file's own directory - see Handler Path Resolution
       inputSchema:
         type: object
         properties:
@@ -172,7 +167,7 @@ tools:
 |-------|----------|-------------|
 | `name` | ✅ Yes | Unique identifier for the tool (snake_case recommended) |
 | `description` | ✅ Yes | Clear description of what the tool does (used by AI) |
-| `handler` | ✅ Yes | Either "builtin" or path to script (e.g., "user/my_tool.js") |
+| `handler` | ✅ Yes | Either "builtin", an absolute path, or a path relative to this YAML file's own directory (e.g., "my_tool.js") - see [Handler Path Resolution](#handler-path-resolution) |
 | `inputSchema` | ✅ Yes | JSON Schema for tool parameters |
 | `outputSchema` | ❌ No | JSON Schema for return value (optional, for documentation) |
 | `tags` | ❌ No | Array of tags for organization |
@@ -226,12 +221,23 @@ inputSchema:
 
 ## Handler Scripts
 
+### Handler Path Resolution
+
+A tool's `handler` value is resolved by exactly one rule, applied in this order:
+
+1. **Absolute path** → used as-is.
+2. **Relative path** → resolved relative to the directory containing that tool's own YAML file. In other words: **put the handler script next to its YAML definition** (optionally in a subfolder, e.g. `handler: scripts/my_tool.js`).
+
+That's it - there's no search across the plugin directory, the vault config directory, or any other guessed location. If a handler doesn't load, the log names the exact single path that was tried, so there's one place to look.
+
+(Earlier versions of this plugin tried several candidate directories per handler, silently falling through to the first one that matched. That made failures hard to diagnose and made deployment layout ambiguous, so it was replaced with the co-location rule above.)
+
 ### Handler Format
 
 Every handler script must export an object with an `execute` function:
 
 ```javascript
-// handlers/user/my_tool.js
+// my_tool.js, next to my_tool.yaml
 
 module.exports = {
   /**
@@ -278,7 +284,7 @@ There is no `context.utils` helper object - handlers that need path sanitization
 ### Example: Simple Handler
 
 ```javascript
-// handlers/user/count_words.js
+// count_words.js
 
 module.exports = {
   async execute(params, context) {
@@ -308,7 +314,7 @@ module.exports = {
 ### Example: Using Other Plugins
 
 ```javascript
-// handlers/user/query_dataview.js
+// query_dataview.js
 
 module.exports = {
   async execute(params, context) {
@@ -336,7 +342,7 @@ module.exports = {
 ### Example: Creating a Note
 
 ```javascript
-// handlers/user/create_note.js
+// create_note.js
 
 module.exports = {
   async execute(params, context) {
@@ -371,20 +377,32 @@ module.exports = {
 
 ### Step-by-Step Guide
 
-**1. Create a handler script:**
+This uses the default tool search path, `.obsidian/mcp-bridge/tools/` in your vault (see Obsidian Settings → MCP Bridge → Tool Discovery for the full list of configured search paths - you can add your own).
+
+**1. Create the tool's YAML definition and its handler script, side by side:**
 
 ```bash
-# Create the handlers/user directory if it doesn't exist
-mkdir -p .obsidian/plugins/mcp-bridge/handlers/user
-
-# Create your handler
-touch .obsidian/plugins/mcp-bridge/handlers/user/my_tool.js
+mkdir -p .obsidian/mcp-bridge/tools
+touch .obsidian/mcp-bridge/tools/my_tool.yaml
+touch .obsidian/mcp-bridge/tools/my_tool.js
 ```
 
-**2. Write your handler:**
+**2. Write the YAML definition** (one tool per file - this is a standalone YAML document, not an entry appended to a shared list):
+
+```yaml
+# .obsidian/mcp-bridge/tools/my_tool.yaml
+name: my_tool
+description: Counts all markdown files in vault
+handler: my_tool.js   # relative to this file's own directory - see Handler Path Resolution
+inputSchema:
+  type: object
+  properties: {}       # No parameters for this tool
+```
+
+**3. Write the handler**, in the same directory as its YAML:
 
 ```javascript
-// .obsidian/plugins/mcp-bridge/handlers/user/my_tool.js
+// .obsidian/mcp-bridge/tools/my_tool.js
 
 module.exports = {
   async execute(params, context) {
@@ -398,19 +416,6 @@ module.exports = {
     };
   }
 };
-```
-
-**3. Add tool definition to tools.yaml:**
-
-```yaml
-tools:
-  user:
-    - name: my_tool
-      description: Counts all markdown files in vault
-      handler: user/my_tool.js
-      inputSchema:
-        type: object
-        properties: {}  # No parameters for this tool
 ```
 
 **4. Reload the plugin:**
@@ -453,13 +458,12 @@ These are implemented in the plugin's TypeScript code and provide core functiona
 
 ### User Tools
 
-User tools are custom handlers in the `handlers/user/` directory:
+User tools are defined by a YAML file in one of your configured tool search paths, with a handler script next to it:
 
 ```yaml
-user:
-  - name: my_custom_tool
-    handler: user/my_custom_tool.js
-    # ...
+name: my_custom_tool
+handler: my_custom_tool.js
+# ...
 ```
 
 **When to use user tools:**
@@ -485,7 +489,7 @@ The `config.sandbox_user_scripts` field in `tools.yaml` **does nothing**. It is 
 
 ### What this means for you
 
-Adding a handler script to `handlers/user/` is exactly as trusting as installing any other Obsidian community plugin, or any VS Code extension: the code runs with your full user-level permissions. The plugin's WebSocket API-key authentication controls **who can invoke a tool over the network** - it is a separate boundary from **what an installed handler is allowed to do once invoked**, and it provides no protection against a malicious or buggy handler script.
+Adding a handler script to one of your tool search paths is exactly as trusting as installing any other Obsidian community plugin, or any VS Code extension: the code runs with your full user-level permissions. The plugin's WebSocket API-key authentication controls **who can invoke a tool over the network** - it is a separate boundary from **what an installed handler is allowed to do once invoked**, and it provides no protection against a malicious or buggy handler script.
 
 ### Best Practices
 
@@ -508,23 +512,22 @@ If real sandboxing (a VM, a worker thread with a restricted API surface, or simi
 **YAML definition:**
 
 ```yaml
-user:
-  - name: get_vault_stats
-    description: Get comprehensive vault statistics
-    handler: user/vault_stats.js
-    inputSchema:
-      type: object
-      properties:
-        includeArchived:
-          type: boolean
-          description: Include archived notes in statistics
-          default: false
+name: get_vault_stats
+description: Get comprehensive vault statistics
+handler: vault_stats.js
+inputSchema:
+  type: object
+  properties:
+    includeArchived:
+      type: boolean
+      description: Include archived notes in statistics
+      default: false
 ```
 
 **Handler:**
 
 ```javascript
-// handlers/user/vault_stats.js
+// vault_stats.js
 
 module.exports = {
   async execute(params, context) {
@@ -571,22 +574,21 @@ module.exports = {
 **YAML definition:**
 
 ```yaml
-user:
-  - name: find_orphaned_notes
-    description: Find notes with no incoming or outgoing links
-    handler: user/find_orphans.js
-    inputSchema:
-      type: object
-      properties:
-        folder:
-          type: string
-          description: Optional folder to search within
+name: find_orphaned_notes
+description: Find notes with no incoming or outgoing links
+handler: find_orphans.js
+inputSchema:
+  type: object
+  properties:
+    folder:
+      type: string
+      description: Optional folder to search within
 ```
 
 **Handler:**
 
 ```javascript
-// handlers/user/find_orphans.js
+// find_orphans.js
 
 module.exports = {
   async execute(params, context) {
@@ -639,36 +641,35 @@ module.exports = {
 **YAML definition:**
 
 ```yaml
-user:
-  - name: bulk_update_tags
-    description: Add or remove tags from multiple notes
-    handler: user/tag_manager.js
-    inputSchema:
+name: bulk_update_tags
+description: Add or remove tags from multiple notes
+handler: tag_manager.js
+inputSchema:
+  type: object
+  properties:
+    operation:
+      type: string
+      enum: [add, remove]
+      description: Whether to add or remove tags
+    tags:
+      type: array
+      items:
+        type: string
+      description: List of tags to add/remove
+    filter:
       type: object
       properties:
-        operation:
+        folder:
           type: string
-          enum: [add, remove]
-          description: Whether to add or remove tags
-        tags:
-          type: array
-          items:
-            type: string
-          description: List of tags to add/remove
-        filter:
-          type: object
-          properties:
-            folder:
-              type: string
-            hasTag:
-              type: string
-      required: [operation, tags]
+        hasTag:
+          type: string
+  required: [operation, tags]
 ```
 
 **Handler:**
 
 ```javascript
-// handlers/user/tag_manager.js
+// tag_manager.js
 
 module.exports = {
   async execute(params, context) {

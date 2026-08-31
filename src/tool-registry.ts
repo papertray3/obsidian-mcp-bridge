@@ -23,7 +23,8 @@ export interface ToolDefinition {
 		properties: Record<string, any>;
 	};
 	// Internal metadata (not part of YAML definition)
-	_sourcePath?: string;  // Which search path this tool was discovered from
+	_sourcePath?: string;  // Which search path this tool was discovered from (display label)
+	_sourceDir?: string;   // Absolute directory containing this tool's YAML file (used to resolve a relative `handler` path)
 }
 
 /**
@@ -266,9 +267,12 @@ export class ToolRegistry {
 					}
 
 					seenToolNames.add(toolDef.name);
-					// Add source path metadata for display purposes
+					// Record where this definition came from: `_sourcePath` is a display label
+					// (the configured search path, possibly relative); `_sourceDir` is the
+					// resolved absolute directory, used to resolve a relative `handler` path.
 					const toolWithSource = toolDef as ToolDefinition;
 					toolWithSource._sourcePath = searchPath;
+					toolWithSource._sourceDir = absolutePath;
 					userTools.push(toolWithSource);
 					logger.debug(`Discovered user tool: ${toolDef.name} from ${searchPath}/${file}`);
 				}
@@ -346,67 +350,54 @@ export class ToolRegistry {
 				// Built-in handlers are in the plugin code
 				this.handlers.set(tool.name, 'builtin');
 			} else {
-				// User handler - resolve path relative to vault config directory
-				try {
-					// Try several candidate paths so handler definitions can be vault-relative,
-					// plugin-relative, or absolute. This makes it easier to install handlers
-					// via the KANTS installer (e.g. into `_kants/...`) or place them under
-					// the vault config directory (`.obsidian/mcp-bridge`).
-					const candidates: string[] = [];
-					// If handler is absolute, try it first
-					if (path.isAbsolute(tool.handler)) candidates.push(tool.handler);
-
-					// Relative to vault config directory (.obsidian/mcp-bridge)
-					candidates.push(path.join(this.vaultConfigDir, tool.handler));
-
-					// Relative to vault root (e.g. _kants/...)
-					try {
-						const vaultBase = (this.app.vault.adapter as any).basePath;
-						if (vaultBase) candidates.push(path.join(vaultBase, tool.handler));
-					} catch (e) {
-						// ignore
-					}
-
-					// Relative to plugin directory (for bundled handlers)
-					candidates.push(path.join(this.pluginDir, tool.handler));
-
-					// Also try common handler locations under the plugin/vault
-					candidates.push(path.join(this.vaultConfigDir, 'handlers', 'user', tool.handler));
-					candidates.push(path.join(this.pluginDir, '.mcp-bridge', 'handlers', 'user', tool.handler));
-
-					let loaded = false;
-					for (const candidate of candidates) {
-						try {
-							if (!candidate) continue;
-							const resolved = path.resolve(candidate);
-							if (!fs.existsSync(resolved)) continue;
-							// Clear require cache to allow hot-reload
-							try {
-								delete require.cache[require.resolve(resolved)];
-							} catch (_e) {}
-							const handler = require(resolved);
-							if (handler && typeof handler.execute === 'function') {
-								this.handlers.set(tool.name, handler);
-								logger.debug(`Loaded handler for user tool: ${tool.name} from ${resolved}`);
-								loaded = true;
-								break;
-							} else {
-								logger.error(`Handler found at ${resolved} but missing execute() function`);
-								loaded = true; // don't try other candidates for this one
-								break;
-							}
-						} catch (err) {
-							logger.error(`Error loading handler candidate ${candidate} for ${tool.name}:`, err);
-						}
-					}
-
-					if (!loaded) {
-						logger.warn(`Handler not found for ${tool.name}. Tried: ${candidates.join(', ')}`);
-					}
-				} catch (error) {
-					logger.error(`Failed to load handler for ${tool.name}:`, error);
-				}
+				this.loadUserHandler(tool);
 			}
+		}
+	}
+
+	/**
+	 * Resolve and load a single user tool's handler script.
+	 *
+	 * Resolution rule (deliberately just one, not a list of guesses):
+	 *   - An absolute `handler` path is used as-is.
+	 *   - Otherwise it's resolved relative to the directory containing the tool's own
+	 *     YAML file (`tool._sourceDir`, set by discoverUserTools()) - i.e. handler scripts
+	 *     are expected to live alongside the YAML that references them.
+	 */
+	private loadUserHandler(tool: ToolDefinition): void {
+		let resolved: string;
+		if (path.isAbsolute(tool.handler)) {
+			resolved = tool.handler;
+		} else if (tool._sourceDir) {
+			resolved = path.join(tool._sourceDir, tool.handler);
+		} else {
+			// Tools loaded via addTool() are always rediscovered (with _sourceDir set)
+			// by the reload() at the end of that method, so this should be unreachable
+			// in practice - but fail loudly rather than guessing at a location.
+			logger.error(`Cannot resolve handler for "${tool.name}": no source directory known for handler "${tool.handler}"`);
+			return;
+		}
+
+		try {
+			if (!fs.existsSync(resolved)) {
+				logger.warn(`Handler not found for "${tool.name}": ${resolved}`);
+				return;
+			}
+
+			// Clear require cache to allow hot-reload
+			try {
+				delete require.cache[require.resolve(resolved)];
+			} catch (_e) {}
+
+			const handler = require(resolved);
+			if (handler && typeof handler.execute === 'function') {
+				this.handlers.set(tool.name, handler);
+				logger.debug(`Loaded handler for "${tool.name}" from ${resolved}`);
+			} else {
+				logger.error(`Handler for "${tool.name}" at ${resolved} is missing an execute() function`);
+			}
+		} catch (err) {
+			logger.error(`Failed to load handler for "${tool.name}" from ${resolved}:`, err);
 		}
 	}
 

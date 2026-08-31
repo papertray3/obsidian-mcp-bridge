@@ -38,18 +38,16 @@ obsidian-mcp-bridge/              # ← Obsidian plugin root
 │   ├── websocket-server.ts       # WebSocket server
 │   └── tool-registry.ts          # Tool registry system
 │
-├── .mcp-bridge/                  # Tool registry
-│   ├── tools.yaml                # Tool definitions
-│   └── handlers/                 # Tool handlers
-│       ├── core/                 # Built-in handlers
-│       └── user/                 # Custom user handlers
+├── mcp-bridge/                    # Built-in tool registry (shipped with plugin)
+│   ├── defaults/                 # tools.defaults.yaml - builtin tool definitions
+│   └── generated/                # Auto-generated mcp-config.json (don't edit)
 │
 ├── servers/                      # MCP Servers
-│   ├── python-old/               # Python MCP server
+│   ├── python/                   # Python MCP server
 │   │   ├── obsidian_mcp_server.py
 │   │   └── obsidian_mcp_server_auto.py
 │   │
-│   └── node-old/                 # Node.js MCP server
+│   └── node/                     # Node.js MCP server
 │       ├── src/
 │       └── package.json
 │
@@ -209,9 +207,22 @@ The MCP Bridge uses a **YAML-based tool registry** that allows users to add cust
 
 ### Example: Adding a Custom Tool
 
-**1. Create a handler script:**
+Tools are discovered from configured **tool search path** directories (default: `.obsidian/mcp-bridge/tools/` in your vault) - each tool is its own YAML file, with its handler script living right next to it (a `handler` path resolves relative to that YAML file's own directory).
+
+**1. Create the tool definition:**
+```yaml
+# .obsidian/mcp-bridge/tools/count_notes.yaml
+name: count_notes
+description: Count total notes in vault
+handler: count_notes.js
+inputSchema:
+  type: object
+  properties: {}
+```
+
+**2. Create its handler, next to the YAML:**
 ```javascript
-// .mcp-bridge/handlers/user/my_tool.js
+// .obsidian/mcp-bridge/tools/count_notes.js
 module.exports = {
   async execute(params, context) {
     const { app } = context;
@@ -221,19 +232,9 @@ module.exports = {
 };
 ```
 
-**2. Add to tools.yaml:**
-```yaml
-tools:
-  user:
-    - name: count_notes
-      description: Count total notes in vault
-      handler: user/my_tool.js
-      inputSchema:
-        type: object
-        properties: {}
-```
-
 **3. Plugin auto-reloads** - Tool is immediately available to AI assistants!
+
+See the [Extensibility Guide](docs/architecture/extensibility.md#handler-path-resolution) for the full handler path resolution rule and more examples.
 
 📖 **[Complete Extensibility Guide](docs/architecture/extensibility.md)** with examples and best practices.
 
