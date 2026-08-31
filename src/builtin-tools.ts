@@ -16,10 +16,12 @@ export class BuiltinTools {
 	 * main.ts's handleBuiltinTool() since they need the full plugin instance.
 	 */
 	async execute(method: string, params: Record<string, unknown>): Promise<unknown> {
-		// Params arrive as untyped JSON from the WebSocket request - these casts
-		// reflect that boundary (no runtime schema validation happens here, matching
-		// existing behavior; the JSON Schema in each tool's YAML is documentation
-		// for the calling AI client, not enforced server-side).
+		// By the time execute() runs, main.ts's handleRequest() has already validated
+		// `params` against this tool's YAML inputSchema (registry/schema-validator.ts) -
+		// that schema is the single real source of truth for the contract. The interfaces
+		// below (GetNoteMetadataParams etc.) are a convenience mirror of it for editor
+		// autocomplete inside each method; these casts are how that post-validation
+		// shape gets attached, not an unchecked trust boundary.
 		switch (method) {
 			case 'search_files':
 				return this.searchFiles(params as unknown as { pattern: string });

@@ -8,6 +8,7 @@ import { RenderedContentCacheManager, CacheSettings } from './cache-manager';
 import { runDataviewBlock, extractDataviewBlocks } from './handlers/dataview-block';
 import { MetadataExtractor } from './metadata-extractor';
 import { BuiltinTools } from './builtin-tools';
+import { assertValidParams } from './registry/schema-validator';
 import { logger } from './logger';
 
 export default class MCPBridgePlugin extends Plugin {
@@ -160,6 +161,13 @@ export default class MCPBridgePlugin extends Plugin {
 
 			if (tool) {
 				logger.debug(`Found tool: ${method} (handler: ${tool.handler})`);
+
+				// The tool's own inputSchema (from its YAML definition) is the single
+				// source of truth for what params it accepts - enforce it here, once,
+				// for every tool (builtin and user-defined alike), rather than each
+				// tool separately re-declaring and hoping it matches.
+				assertValidParams(method, tool.inputSchema, params);
+
 				// Route to appropriate handler
 				if (tool.handler === 'builtin') {
 					return this.handleBuiltinTool(method, params);

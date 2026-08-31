@@ -168,7 +168,7 @@ tools:
 | `name` | ✅ Yes | Unique identifier for the tool (snake_case recommended) |
 | `description` | ✅ Yes | Clear description of what the tool does (used by AI) |
 | `handler` | ✅ Yes | Either "builtin", an absolute path, or a path relative to this YAML file's own directory (e.g., "my_tool.js") - see [Handler Path Resolution](#handler-path-resolution) |
-| `inputSchema` | ✅ Yes | JSON Schema for tool parameters |
+| `inputSchema` | ✅ Yes | JSON Schema for tool parameters. Both shown to AI clients (via `tools/list`) *and enforced*: every call is validated against it before your handler ever runs, so a call missing a required field or with a wrong type is rejected with a clear error instead of reaching your code |
 | `outputSchema` | ❌ No | JSON Schema for return value (optional, for documentation) |
 | `tags` | ❌ No | Array of tags for organization |
 | `category` | ❌ No | Category for grouping (e.g., "notes", "search", "analysis") |

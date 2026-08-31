@@ -177,6 +177,21 @@ describe('End-to-end request/response flow', () => {
 		expect(response.result).toMatchObject({ status: 'ok' });
 	});
 
+	it('rejects a builtin tool call missing a required param, per its YAML inputSchema', async () => {
+		// search_files declares `pattern` as required in tools.defaults.yaml - that
+		// schema is now the single enforced contract, not just documentation shown
+		// to AI clients, so this must be rejected before ever reaching BuiltinTools.
+		const ws = makeFakeSocket();
+		(server as any).handleConnection(ws);
+
+		await deliver(ws, { data: JSON.stringify({ method: 'search_files', params: {}, auth: 'secret-key', id: '8' }) });
+
+		const response = JSON.parse(ws.sent[0]);
+		expect(response.id).toBe('8');
+		expect(response.error).toContain('search_files');
+		expect(response.error).toContain('pattern');
+	});
+
 	it('surfaces an error response for an unknown method', async () => {
 		const ws = makeFakeSocket();
 		(server as any).handleConnection(ws);
