@@ -2,6 +2,7 @@ import { TFile, Vault } from 'obsidian';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { logger } from './logger';
 
 export interface CacheEntry {
 	hash: string;
@@ -28,6 +29,12 @@ export class RenderedContentCacheManager {
 	private settings: CacheSettings;
 	private metadata: CacheMetadata;
 	private metadataPath: string;
+	private saveTimer: ReturnType<typeof setTimeout> | null = null;
+	// Debounced rather than immediate: metadata.entries already lives in memory as the
+	// source of truth for reads (get()/set() never re-read from disk), so the only cost
+	// of coalescing writes is a slightly stale metadata.json if the process crashes -
+	// flush() (called on plugin unload) covers the normal shutdown path.
+	private readonly saveDebounceMs = 500;
 
 	constructor(vault: Vault, settings: CacheSettings) {
 		this.vault = vault;
@@ -77,13 +84,13 @@ export class RenderedContentCacheManager {
 		if (!fs.existsSync(cachePath)) {
 			// Cache entry exists but file is missing - clean up
 			delete this.metadata.entries[hash];
-			await this.saveMetadata();
+			this.scheduleSave();
 			return null;
 		}
 
 		// Update last access time
 		entry.lastAccess = Date.now();
-		await this.saveMetadata();
+		this.scheduleSave();
 
 		// Read cached content
 		const content = fs.readFileSync(cachePath, 'utf-8');
@@ -124,10 +131,10 @@ export class RenderedContentCacheManager {
 
 		this.metadata.entries[hash] = entry;
 		this.metadata.totalSize += cachedSize;
-		await this.saveMetadata();
+		this.scheduleSave();
 
 		// Enforce size limit
-		await this.enforceSizeLimit();
+		this.enforceSizeLimit();
 
 		// Return vault-relative path for cross-environment compatibility
 		return this.toVaultRelativePath(cachePath);
@@ -136,8 +143,9 @@ export class RenderedContentCacheManager {
 	/**
 	 * Enforce cache size limit using LRU eviction
 	 */
-	private async enforceSizeLimit(): Promise<void> {
+	private enforceSizeLimit(): void {
 		const maxSizeBytes = this.settings.maxSizeMB * 1024 * 1024;
+		let evicted = false;
 
 		while (this.metadata.totalSize > maxSizeBytes) {
 			// Find oldest entry by lastAccess
@@ -164,9 +172,10 @@ export class RenderedContentCacheManager {
 			// Update metadata
 			this.metadata.totalSize -= oldestEntry.cachedSize;
 			delete this.metadata.entries[oldestHash];
+			evicted = true;
 		}
 
-		await this.saveMetadata();
+		if (evicted) this.scheduleSave();
 	}
 
 	/**
@@ -181,15 +190,36 @@ export class RenderedContentCacheManager {
 			const data = fs.readFileSync(this.metadataPath, 'utf-8');
 			return JSON.parse(data);
 		} catch (error) {
-			console.error('Failed to load cache metadata:', error);
+			logger.error('Failed to load cache metadata:', error);
 			return { entries: {}, totalSize: 0 };
 		}
 	}
 
 	/**
-	 * Save metadata to disk
+	 * Debounce a metadata write: `get()`/`set()` mutate the in-memory
+	 * `this.metadata` directly (reads never hit disk), so coalescing the
+	 * writes behind a short delay avoids doing a full JSON serialize + file
+	 * write on every single cache access. flush() (called on plugin unload)
+	 * covers the shutdown path so a debounced write is never silently lost.
 	 */
-	private async saveMetadata(): Promise<void> {
+	private scheduleSave(): void {
+		if (this.saveTimer) clearTimeout(this.saveTimer);
+		this.saveTimer = setTimeout(() => {
+			this.saveTimer = null;
+			this.saveMetadataNow();
+		}, this.saveDebounceMs);
+	}
+
+	/** Writes pending metadata to disk immediately, canceling any scheduled debounce. */
+	flush(): void {
+		if (this.saveTimer) {
+			clearTimeout(this.saveTimer);
+			this.saveTimer = null;
+		}
+		this.saveMetadataNow();
+	}
+
+	private saveMetadataNow(): void {
 		// Ensure cache directory exists
 		const cacheDir = path.dirname(this.metadataPath);
 		if (!fs.existsSync(cacheDir)) {
@@ -203,7 +233,7 @@ export class RenderedContentCacheManager {
 				'utf-8'
 			);
 		} catch (error) {
-			console.error('Failed to save cache metadata:', error);
+			logger.error('Failed to save cache metadata:', error);
 		}
 	}
 
@@ -216,7 +246,7 @@ export class RenderedContentCacheManager {
 		}
 
 		this.metadata = { entries: {}, totalSize: 0 };
-		await this.saveMetadata();
+		this.flush();
 	}
 
 	/**

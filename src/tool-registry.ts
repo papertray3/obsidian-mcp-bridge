@@ -1,82 +1,47 @@
-import { App, TFile, Vault, Notice } from 'obsidian';
+import { App, Notice } from 'obsidian';
 import * as yaml from 'js-yaml';
 import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from './logger';
+import { ToolDefinition, ToolsConfig, HandlerContext, HandlerResult, UserHandlerModule, getAllToolDefinitions } from './registry/types';
+import { loadYamlFile } from './registry/yaml-loader';
+import { discoverUserTools } from './registry/discovery';
+import { validateToolsConfig } from './registry/validation';
+import { loadUserHandler } from './registry/handler-loader';
+import { writeMcpConfig } from './registry/mcp-config-writer';
+import { ToolFileWatcher } from './registry/file-watcher';
 
-/**
- * Tool definition from YAML
- */
-export interface ToolDefinition {
-	name: string;
-	description: string;
-	handler: string;  // "builtin" or path to script (e.g., "user/my_tool.js")
-	category?: string;
-	tags?: string[];
-	inputSchema: {
-		type: string;
-		properties: Record<string, any>;
-		required?: string[];
-	};
-	outputSchema?: {
-		type: string;
-		properties: Record<string, any>;
-	};
-	// Internal metadata (not part of YAML definition)
-	_sourcePath?: string;  // Which search path this tool was discovered from (display label)
-	_sourceDir?: string;   // Absolute directory containing this tool's YAML file (used to resolve a relative `handler` path)
-}
+export type { ToolDefinition, ToolsConfig, HandlerContext, HandlerResult };
 
-/**
- * Tools YAML structure
- */
-export interface ToolsConfig {
+interface ToolsDefaultsFile {
 	version: string;
-	config: {
-		auto_reload: boolean;
-		sandbox_user_scripts: boolean;
-		enable_auto_generation: boolean;
-	};
-	tools: {
-		builtin: ToolDefinition[];
-		user: ToolDefinition[];
-		auto: ToolDefinition[];
-	};
+	config: ToolsConfig['config'];
+	tools: { builtin?: ToolDefinition[] };
+}
+
+function isToolsDefaultsFile(value: unknown): value is ToolsDefaultsFile {
+	if (typeof value !== 'object' || value === null) return false;
+	const v = value as Record<string, unknown>;
+	return typeof v.version === 'string' && typeof v.config === 'object' && typeof v.tools === 'object';
 }
 
 /**
- * Handler context provided to user scripts
- */
-export interface HandlerContext {
-	app: App;
-	vault: Vault;
-	workspace: any;
-	metadataCache: any;
-	fileManager: any;
-	plugins: Record<string, any>;
-}
-
-/**
- * Handler execution result
- */
-export interface HandlerResult {
-	[key: string]: any;
-}
-
-/**
- * Tool Registry - Manages tool definitions and handlers
+ * Tool Registry - orchestrates config loading, discovery, handler loading,
+ * hot-reload, and execution. The actual logic for each of those lives in
+ * src/registry/* as small, independently testable, mostly-pure modules;
+ * this class holds the stateful pieces (loaded config, loaded handlers, the
+ * file watcher) and wires them together.
  */
 export class ToolRegistry {
 	private app: App;
 	private pluginDir: string;
 	private defaultsPath: string;
 	private vaultConfigDir: string;
-	private overridesPath: string;
 	private userToolsDir: string;
 	private generatedPath: string;
 	private config: ToolsConfig | null = null;
-	private handlers: Map<string, any> = new Map();
-	private fileWatcher: any = null;
+	private handlers: Map<string, 'builtin' | UserHandlerModule> = new Map();
+	private fileWatcher: ToolFileWatcher = new ToolFileWatcher();
 	private initialized: boolean = false;
 	private cachedAllTools: ToolDefinition[] = [];
 	private toolSearchPaths: string[];
@@ -93,7 +58,6 @@ export class ToolRegistry {
 
 		// Vault-level user config (preserved across updates)
 		this.vaultConfigDir = path.join(this.vaultBasePath, '.obsidian', 'mcp-bridge');
-		this.overridesPath = path.join(this.vaultConfigDir, 'overrides.yaml');
 		this.userToolsDir = path.join(this.vaultConfigDir, 'tools');
 
 		// Generated output (in plugin directory)
@@ -111,25 +75,20 @@ export class ToolRegistry {
 
 		logger.info('Initializing tool registry...');
 
-		// Ensure directories exist
-		await this.ensureDirectories();
+		this.ensureDirectories();
 		logger.debug('Directories ensured');
 
-		// Load tools.yaml
 		await this.loadConfig();
 		logger.debug('Config loaded');
 
-		// Load handlers
-		await this.loadHandlers();
+		this.loadHandlers();
 		logger.debug('Handlers loaded');
 
-		// Generate MCP config
-		await this.generateMCPConfig();
+		this.generateMCPConfig();
 		logger.debug('MCP config generated');
 
-		// Setup file watcher if auto_reload enabled
 		if (this.config?.config.auto_reload) {
-			this.setupFileWatcher();
+			this.fileWatcher.start([this.defaultsPath, this.vaultConfigDir], () => this.reload());
 		}
 
 		this.initialized = true;
@@ -139,7 +98,7 @@ export class ToolRegistry {
 	/**
 	 * Ensure required directories exist
 	 */
-	private async ensureDirectories(): Promise<void> {
+	private ensureDirectories(): void {
 		const dirs = [
 			this.generatedPath,           // Plugin generated files
 			this.vaultConfigDir,          // Vault-level config directory
@@ -162,18 +121,18 @@ export class ToolRegistry {
 			logger.info('Loading tool configurations...');
 
 			// 1. Load plugin defaults (always present)
-			const defaults = await this.loadYaml(this.defaultsPath);
-			if (!defaults) {
+			const defaults = loadYamlFile(this.defaultsPath);
+			if (!defaults || !isToolsDefaultsFile(defaults)) {
 				throw new Error('Plugin defaults not found - corrupted installation');
 			}
 			logger.debug(`Loaded ${defaults.tools.builtin?.length || 0} builtin tools from defaults`);
 
 			// 2. Discover user-defined tools
-			const userTools = await this.discoverUserTools();
+			const userTools = await discoverUserTools(this.toolSearchPaths, this.vaultBasePath);
 			logger.debug(`Discovered ${userTools.length} user tools`);
 
 			// 3. Merge configurations
-			this.config = {
+			const config: ToolsConfig = {
 				version: defaults.version,
 				config: defaults.config,
 				tools: {
@@ -184,7 +143,8 @@ export class ToolRegistry {
 			};
 
 			// 4. Validate final configuration
-			this.validateConfig();
+			validateToolsConfig(config);
+			this.config = config;
 
 			logger.info(`Tool registry loaded - ${this.getStats().total} total tools`);
 		} catch (error) {
@@ -195,240 +155,22 @@ export class ToolRegistry {
 	}
 
 	/**
-	 * Load and parse a YAML file
+	 * Load all handler scripts (builtin tools just get tagged; user tool
+	 * handlers are require()'d - see registry/handler-loader.ts).
 	 */
-	private async loadYaml(filePath: string): Promise<any> {
-		if (!fs.existsSync(filePath)) {
-			return null;
-		}
-
-		try {
-			const content = fs.readFileSync(filePath, 'utf8');
-			return yaml.load(content);
-		} catch (error) {
-			logger.error(`Failed to parse YAML file ${filePath}:`, error);
-			return null;
-		}
-	}
-
-	/**
-	 * Discover user-defined tools from all configured search paths
-	 */
-	private async discoverUserTools(): Promise<ToolDefinition[]> {
-		const userTools: ToolDefinition[] = [];
-		const seenToolNames = new Set<string>();
-
-		// Search all configured paths
-		for (const searchPath of this.toolSearchPaths) {
-			// Resolve path relative to vault root
-			const absolutePath = path.isAbsolute(searchPath)
-				? searchPath
-				: path.join(this.vaultBasePath, searchPath);
-
-			// Check if directory exists
-			if (!fs.existsSync(absolutePath)) {
-				logger.debug(`Tool search path does not exist: ${searchPath} (${absolutePath})`);
-				continue;
-			}
-
-			// Check if it's a directory
-			const stats = fs.statSync(absolutePath);
-			if (!stats.isDirectory()) {
-				logger.warn(`Tool search path is not a directory: ${searchPath}`);
-				continue;
-			}
-
-			try {
-				// Scan for .yaml files in directory
-				const files = fs.readdirSync(absolutePath)
-					.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
-
-				logger.debug(`Searching ${searchPath} - found ${files.length} YAML files`);
-
-				for (const file of files) {
-					const filePath = path.join(absolutePath, file);
-					const toolDef = await this.loadYaml(filePath);
-
-					if (!toolDef) {
-						logger.warn(`Failed to load user tool: ${file} from ${searchPath}`);
-						continue;
-					}
-
-					// Validate required fields
-					if (!toolDef.name || !toolDef.description || !toolDef.handler || !toolDef.inputSchema) {
-						logger.warn(`Invalid tool definition in ${file} - missing required fields`);
-						continue;
-					}
-
-					// Check for duplicate tool names across all search paths
-					if (seenToolNames.has(toolDef.name)) {
-						logger.warn(`Duplicate tool name "${toolDef.name}" found in ${searchPath}/${file} - skipping`);
-						continue;
-					}
-
-					seenToolNames.add(toolDef.name);
-					// Record where this definition came from: `_sourcePath` is a display label
-					// (the configured search path, possibly relative); `_sourceDir` is the
-					// resolved absolute directory, used to resolve a relative `handler` path.
-					const toolWithSource = toolDef as ToolDefinition;
-					toolWithSource._sourcePath = searchPath;
-					toolWithSource._sourceDir = absolutePath;
-					userTools.push(toolWithSource);
-					logger.debug(`Discovered user tool: ${toolDef.name} from ${searchPath}/${file}`);
-				}
-			} catch (error) {
-				logger.error(`Error discovering tools in ${searchPath}:`, error);
-			}
-		}
-
-		return userTools;
-	}
-
-	/**
-	 * Validate tools configuration
-	 */
-	private validateConfig(): void {
-		if (!this.config) {
-			throw new Error('Config is null');
-		}
-
-		// Check version
-		if (!this.config.version) {
-			throw new Error('tools.yaml missing version field');
-		}
-
-		// Check required sections
-		if (!this.config.tools) {
-			throw new Error('tools.yaml missing tools section');
-		}
-
-		// Validate each tool
-		const allTools = [
-			...(this.config.tools.builtin || []),
-			...(this.config.tools.user || []),
-			...(this.config.tools.auto || [])
-		];
-
-		const seen = new Set<string>();
-		for (const tool of allTools) {
-			// Check required fields
-			if (!tool.name) {
-				throw new Error('Tool missing name field');
-			}
-			if (!tool.description) {
-				throw new Error(`Tool ${tool.name} missing description`);
-			}
-			if (!tool.handler) {
-				throw new Error(`Tool ${tool.name} missing handler`);
-			}
-			if (!tool.inputSchema) {
-				throw new Error(`Tool ${tool.name} missing inputSchema`);
-			}
-
-			// Check for duplicates
-			if (seen.has(tool.name)) {
-				throw new Error(`Duplicate tool name: ${tool.name}`);
-			}
-			seen.add(tool.name);
-		}
-	}
-
-	/**
-	 * Load handler scripts
-	 */
-	private async loadHandlers(): Promise<void> {
+	private loadHandlers(): void {
 		if (!this.config) return;
 
-		const allTools = [
-			...(this.config.tools.builtin || []),
-			...(this.config.tools.user || []),
-			...(this.config.tools.auto || [])
-		];
-
-		for (const tool of allTools) {
+		for (const tool of getAllToolDefinitions(this.config)) {
 			if (tool.handler === 'builtin') {
-				// Built-in handlers are in the plugin code
 				this.handlers.set(tool.name, 'builtin');
-			} else {
-				this.loadUserHandler(tool);
-			}
-		}
-	}
-
-	/**
-	 * Resolve and load a single user tool's handler script.
-	 *
-	 * Resolution rule (deliberately just one, not a list of guesses):
-	 *   - An absolute `handler` path is used as-is.
-	 *   - Otherwise it's resolved relative to the directory containing the tool's own
-	 *     YAML file (`tool._sourceDir`, set by discoverUserTools()) - i.e. handler scripts
-	 *     are expected to live alongside the YAML that references them.
-	 */
-	private loadUserHandler(tool: ToolDefinition): void {
-		let resolved: string;
-		if (path.isAbsolute(tool.handler)) {
-			resolved = tool.handler;
-		} else if (tool._sourceDir) {
-			resolved = path.join(tool._sourceDir, tool.handler);
-		} else {
-			// Tools loaded via addTool() are always rediscovered (with _sourceDir set)
-			// by the reload() at the end of that method, so this should be unreachable
-			// in practice - but fail loudly rather than guessing at a location.
-			logger.error(`Cannot resolve handler for "${tool.name}": no source directory known for handler "${tool.handler}"`);
-			return;
-		}
-
-		try {
-			if (!fs.existsSync(resolved)) {
-				logger.warn(`Handler not found for "${tool.name}": ${resolved}`);
-				return;
+				continue;
 			}
 
-			// Clear require cache to allow hot-reload
-			try {
-				delete require.cache[require.resolve(resolved)];
-			} catch (_e) {}
-
-			const handler = require(resolved);
-			if (handler && typeof handler.execute === 'function') {
+			const handler = loadUserHandler(tool);
+			if (handler) {
 				this.handlers.set(tool.name, handler);
-				logger.debug(`Loaded handler for "${tool.name}" from ${resolved}`);
-			} else {
-				logger.error(`Handler for "${tool.name}" at ${resolved} is missing an execute() function`);
 			}
-		} catch (err) {
-			logger.error(`Failed to load handler for "${tool.name}" from ${resolved}:`, err);
-		}
-	}
-
-	/**
-	 * Setup file watcher for hot-reload
-	 */
-	private setupFileWatcher(): void {
-		try {
-			// Watch plugin defaults
-			if (fs.existsSync(this.defaultsPath)) {
-				fs.watch(this.defaultsPath, async (eventType) => {
-					if (eventType === 'change') {
-						logger.info('Plugin defaults changed, reloading...');
-						await this.reload();
-					}
-				});
-			}
-
-			// Watch vault config directory (user tools and overrides)
-			if (fs.existsSync(this.vaultConfigDir)) {
-				fs.watch(this.vaultConfigDir, { recursive: true }, async (eventType, filename) => {
-					if (filename && (filename.endsWith('.yaml') || filename.endsWith('.js'))) {
-						logger.info(`Vault config changed (${filename}), reloading...`);
-						await this.reload();
-					}
-				});
-			}
-
-			logger.debug('File watcher active');
-		} catch (error) {
-			logger.error('Failed to setup file watcher:', error);
 		}
 	}
 
@@ -446,8 +188,8 @@ export class ToolRegistry {
 	async reload(): Promise<void> {
 		try {
 			await this.loadConfig();
-			await this.loadHandlers();
-			await this.generateMCPConfig();
+			this.loadHandlers();
+			this.generateMCPConfig();
 			this.cachedAllTools = []; // Invalidate cache
 			new Notice('MCP Bridge: Tool registry reloaded');
 			logger.info('Tool registry reloaded successfully');
@@ -460,29 +202,10 @@ export class ToolRegistry {
 	/**
 	 * Generate MCP server configuration
 	 */
-	private async generateMCPConfig(): Promise<void> {
+	private generateMCPConfig(): void {
 		if (!this.config) return;
-
-		const allTools = this.getAllTools();
-
-		// Convert to MCP format
-		const mcpConfig = {
-			version: this.config.version,
-			tools: allTools.map(tool => ({
-				name: tool.name,
-				description: tool.description,
-				inputSchema: tool.inputSchema,
-				...(tool.outputSchema && { outputSchema: tool.outputSchema }),
-				...(tool.category && { category: tool.category }),
-				...(tool.tags && { tags: tool.tags })
-			}))
-		};
-
-		// Write to generated/mcp-config.json
 		const outputPath = path.join(this.generatedPath, 'mcp-config.json');
-		fs.writeFileSync(outputPath, JSON.stringify(mcpConfig, null, 2));
-
-		logger.debug(`Generated MCP config at ${outputPath}`);
+		writeMcpConfig(this.config, this.getAllTools(), outputPath);
 	}
 
 	/**
@@ -494,13 +217,8 @@ export class ToolRegistry {
 			return [];
 		}
 
-		// Return cached version for speed
-		if (this.cachedAllTools.length === 0 || !this.config) {
-			this.cachedAllTools = [
-				...(this.config.tools.builtin || []),
-				...(this.config.tools.user || []),
-				...(this.config.tools.auto || [])
-			];
+		if (this.cachedAllTools.length === 0) {
+			this.cachedAllTools = getAllToolDefinitions(this.config);
 		}
 
 		return this.cachedAllTools;
@@ -516,7 +234,7 @@ export class ToolRegistry {
 	/**
 	 * Execute a tool
 	 */
-	async executeTool(name: string, params: any): Promise<HandlerResult> {
+	async executeTool(name: string, params: Record<string, unknown>): Promise<HandlerResult> {
 		const tool = this.getTool(name);
 		if (!tool) {
 			throw new Error(`Tool not found: ${name}`);
@@ -532,16 +250,8 @@ export class ToolRegistry {
 			throw new Error(`Builtin tool ${name} should be handled by plugin`);
 		}
 
-		// Execute user handler
-		const context = this.createContext();
-
 		try {
-			if (typeof handler.execute !== 'function') {
-				throw new Error(`Handler for ${name} missing execute function`);
-			}
-
-			const result = await handler.execute(params, context);
-			return result;
+			return await handler.execute(params, this.createContext());
 		} catch (error) {
 			logger.error(`Error executing ${name}:`, error);
 			throw error;
@@ -565,8 +275,8 @@ export class ToolRegistry {
 	/**
 	 * Get available plugin APIs
 	 */
-	private getPluginAPIs(): Record<string, any> {
-		const plugins: Record<string, any> = {};
+	private getPluginAPIs(): Record<string, unknown> {
+		const plugins: Record<string, unknown> = {};
 
 		// @ts-ignore - accessing internal plugin registry
 		const pluginRegistry = this.app.plugins?.plugins || {};
@@ -592,7 +302,7 @@ export class ToolRegistry {
 	/**
 	 * Get tool statistics
 	 */
-	getStats(): any {
+	getStats(): { total: number; builtin: number; user: number; auto: number } {
 		if (!this.config) {
 			return { total: 0, builtin: 0, user: 0, auto: 0 };
 		}
@@ -607,12 +317,8 @@ export class ToolRegistry {
 
 	/**
 	 * Programmatically add a custom tool (for installation scripts, etc.)
-	 * @param toolDefinition - Tool definition object
-	 * @param options - Options for adding the tool
-	 * @returns Promise that resolves when tool is added
 	 */
 	async addTool(toolDefinition: ToolDefinition, options?: { overwrite?: boolean }): Promise<void> {
-		// Validate required fields
 		if (!toolDefinition.name) {
 			throw new Error('Tool definition missing required field: name');
 		}
@@ -626,23 +332,19 @@ export class ToolRegistry {
 			throw new Error('Tool definition missing required field: inputSchema');
 		}
 
-		// Ensure user tools directory exists
 		if (!fs.existsSync(this.userToolsDir)) {
 			fs.mkdirSync(this.userToolsDir, { recursive: true });
 			logger.debug(`Created user tools directory: ${this.userToolsDir}`);
 		}
 
-		// Determine filename
 		const filename = `${toolDefinition.name}.yaml`;
 		const filePath = path.join(this.userToolsDir, filename);
 
-		// Check if tool already exists
 		if (fs.existsSync(filePath) && !options?.overwrite) {
 			throw new Error(`Tool "${toolDefinition.name}" already exists. Use overwrite option to replace.`);
 		}
 
-		// Build YAML structure
-		const toolYaml: any = {
+		const toolYaml: Record<string, unknown> = {
 			name: toolDefinition.name,
 			description: toolDefinition.description,
 			handler: toolDefinition.handler,
@@ -652,21 +354,17 @@ export class ToolRegistry {
 		if (toolDefinition.category) {
 			toolYaml.category = toolDefinition.category;
 		}
-
 		if (toolDefinition.tags && toolDefinition.tags.length > 0) {
 			toolYaml.tags = toolDefinition.tags;
 		}
-
 		if (toolDefinition.outputSchema) {
 			toolYaml.outputSchema = toolDefinition.outputSchema;
 		}
 
-		// Write to file
 		try {
 			fs.writeFileSync(filePath, yaml.dump(toolYaml, { indent: 2 }));
 			logger.info(`Tool "${toolDefinition.name}" added successfully at ${filePath}`);
 
-			// Reload tool registry to pick up the new tool
 			await this.reload();
 		} catch (error) {
 			logger.error(`Failed to add tool "${toolDefinition.name}":`, error);
@@ -678,9 +376,6 @@ export class ToolRegistry {
 	 * Cleanup
 	 */
 	destroy(): void {
-		// Stop file watcher
-		if (this.fileWatcher) {
-			this.fileWatcher.close();
-		}
+		void this.fileWatcher.stop();
 	}
 }

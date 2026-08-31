@@ -1,4 +1,4 @@
-import { Plugin, Notice, TFile } from 'obsidian';
+import { Plugin, Notice } from 'obsidian';
 import { randomUUID } from 'crypto';
 import { MCPBridgeSettings, DEFAULT_SETTINGS, MCPBridgeSettingsTab } from './settings';
 import { MCPWebSocketServer, MCPRequest } from './websocket-server';
@@ -7,6 +7,7 @@ import * as path from 'path';
 import { RenderedContentCacheManager, CacheSettings } from './cache-manager';
 import { runDataviewBlock, extractDataviewBlocks } from './handlers/dataview-block';
 import { MetadataExtractor } from './metadata-extractor';
+import { BuiltinTools } from './builtin-tools';
 import { logger } from './logger';
 
 export default class MCPBridgePlugin extends Plugin {
@@ -15,6 +16,7 @@ export default class MCPBridgePlugin extends Plugin {
 	toolRegistry: ToolRegistry;
 	cacheManager: RenderedContentCacheManager;
 	metadataExtractor: MetadataExtractor;
+	builtinTools: BuiltinTools;
 
 	async onload() {
 		await this.loadSettings();
@@ -35,6 +37,8 @@ export default class MCPBridgePlugin extends Plugin {
 			this.app.metadataCache,
 			this.app.vault
 		);
+
+		this.builtinTools = new BuiltinTools(this.app, this.metadataExtractor);
 
 		// Generate API key if not set
 		if (!this.settings.apiKey) {
@@ -124,6 +128,9 @@ export default class MCPBridgePlugin extends Plugin {
 		// Cleanup tool registry
 		this.toolRegistry.destroy();
 
+		// Flush any debounced cache metadata write so it isn't lost
+		this.cacheManager?.flush();
+
 		logger.info('Plugin unloaded');
 	}
 
@@ -142,7 +149,7 @@ export default class MCPBridgePlugin extends Plugin {
 	/**
 	 * Handle incoming MCP requests
 	 */
-	async handleRequest(request: MCPRequest): Promise<any> {
+	async handleRequest(request: MCPRequest): Promise<unknown> {
 		const { method, params = {} } = request;
 
 		logger.debug(`Handling request: ${method}`, params);
@@ -185,51 +192,51 @@ export default class MCPBridgePlugin extends Plugin {
 
 				case 'tools/list':
 					// Return all available tools
-				try {
-					const allTools = this.toolRegistry?.getAllTools() || [];
-					logger.debug(`Listing ${allTools.length} tools`);
+					try {
+						const allTools = this.toolRegistry?.getAllTools() || [];
+						logger.debug(`Listing ${allTools.length} tools`);
 
-					// Build response incrementally to avoid blocking
-					const toolsArray: any[] = [];
-					for (const t of allTools) {
-						const toolDef = {
-							name: t.name,
-							description: t.description,
-							inputSchema: t.inputSchema,
-							...(t.outputSchema && { outputSchema: t.outputSchema }),
-							...(t.category && { category: t.category }),
-							...(t.tags && { tags: t.tags })
+						// Build response incrementally to avoid blocking
+						const toolsArray: Record<string, unknown>[] = [];
+						for (const t of allTools) {
+							toolsArray.push({
+								name: t.name,
+								description: t.description,
+								inputSchema: t.inputSchema,
+								...(t.outputSchema && { outputSchema: t.outputSchema }),
+								...(t.category && { category: t.category }),
+								...(t.tags && { tags: t.tags })
+							});
+						}
+
+						logger.debug(`Returning ${toolsArray.length} tools with schemas`);
+						return {
+							tools: toolsArray
 						};
-
-						toolsArray.push(toolDef);
+					} catch (error) {
+						logger.error('Error listing tools:', error);
+						return {
+							tools: [],
+							error: `Failed to list tools: ${error instanceof Error ? error.message : 'Unknown error'}`,
+						};
 					}
 
-					logger.debug(`Returning ${toolsArray.length} tools with schemas`);
-					return {
-						tools: toolsArray
-					};
-				} catch (error) {
-					logger.error('Error listing tools:', error);
-					return {
-						tools: [],
-						error: `Failed to list tools: ${error instanceof Error ? error.message : 'Unknown error'}`,
-					};
-				}
-
-			default:
-				logger.warn(`Unknown method: '${method}'`);
-				throw new Error(`Unknown method: ${method}`);
+				default:
+					logger.warn(`Unknown method: '${method}'`);
+					throw new Error(`Unknown method: ${method}`);
+			}
+		} catch (error) {
+			logger.error(`Error handling request '${method}':`, error);
+			throw error;
 		}
-	} catch (error) {
-		logger.error(`Error handling request '${method}':`, error);
-		throw error;
-	}
 	}
 
 	/**
-	 * Handle built-in tools
+	 * Handle built-in tools. `ping` and the Dataview tools stay here since
+	 * they need the full plugin instance; everything else delegates to
+	 * BuiltinTools (src/builtin-tools.ts).
 	 */
-	private async handleBuiltinTool(method: string, params: any): Promise<any> {
+	private async handleBuiltinTool(method: string, params: Record<string, unknown>): Promise<unknown> {
 		switch (method) {
 			case 'ping':
 				return {
@@ -238,202 +245,14 @@ export default class MCPBridgePlugin extends Plugin {
 					version: '2.0.0-extensible'
 				};
 
-			case 'search_files':
-				return this.searchFiles(params);
-
-			case 'get_note_raw':
-				return this.getNoteRaw(params);
-
-			case 'get_note_metadata':
-				return this.getNoteMetadata(params);
-
-			case 'get_note_links':
-				return this.getNoteLinks(params);
-
-			case 'resolve_wiki_links':
-				return this.resolveWikiLinks(params);
-
-			case 'list_vault_files':
-				return this.listVaultFiles(params);
-
 			case 'run_dataview_block':
-				return await runDataviewBlock(this, params);
+				return await runDataviewBlock(this, params as any);
 
 			case 'extract_dataview_blocks':
-				return await extractDataviewBlocks(this, params.filepath);
+				return await extractDataviewBlocks(this, params.filepath as string);
 
 			default:
-				throw new Error(`Unknown builtin tool: ${method}`);
+				return this.builtinTools.execute(method, params);
 		}
-	}
-
-	/**
-	 * Built-in: Search for files using glob patterns
-	 */
-	private async searchFiles(params: { pattern: string }): Promise<any> {
-		const { pattern } = params;
-
-		// Simple glob matching (could be enhanced with proper glob library)
-		const files = this.app.vault.getMarkdownFiles();
-		const regex = this.globToRegex(pattern);
-
-		const matches = files
-			.filter(f => regex.test(f.path))
-			.map(f => f.path);
-
-		return {
-			pattern: pattern,
-			matches: matches.length,
-			files: matches
-		};
-	}
-
-	/**
-	 * Built-in: Get raw markdown content of a note
-	 */
-	private async getNoteRaw(params: { filepath: string }): Promise<string> {
-		const { filepath } = params;
-
-		const file = this.app.vault.getAbstractFileByPath(filepath);
-		if (!file || !(file instanceof TFile)) {
-			throw new Error(`File not found: ${filepath}`);
-		}
-
-		const content = await this.app.vault.read(file);
-
-		return content;
-	}
-
-	/**
-	 * Built-in: List all markdown files in vault or folder
-	 */
-	private async listVaultFiles(params: { folder?: string }): Promise<any> {
-		const { folder = '' } = params;
-
-		const files = this.app.vault.getMarkdownFiles();
-
-		const filtered = folder
-			? files.filter(f => f.path.startsWith(folder))
-			: files;
-
-		return {
-			folder: folder || 'vault root',
-			count: filtered.length,
-			files: filtered.map(f => ({
-				path: f.path,
-				name: f.name,
-				basename: f.basename,
-				extension: f.extension,
-				stat: {
-					ctime: f.stat.ctime,
-					mtime: f.stat.mtime,
-					size: f.stat.size
-				}
-			}))
-		};
-	}
-
-	/**
-	 * Built-in: Get structured metadata for a note
-	 */
-	private async getNoteMetadata(params: {
-		filepath: string;
-		includeLinks?: boolean;
-		includeBacklinks?: boolean;
-		maxLinks?: number;
-		resolvePaths?: boolean;
-	}): Promise<any> {
-		const { filepath, includeLinks, includeBacklinks, maxLinks, resolvePaths } = params;
-
-		const file = this.app.vault.getAbstractFileByPath(filepath);
-		if (!file || !(file instanceof TFile)) {
-			throw new Error(`File not found: ${filepath}`);
-		}
-
-		const metadata = await this.metadataExtractor.extractNoteMetadata(file, {
-			includeLinks,
-			includeBacklinks,
-			maxLinks,
-			resolvePaths
-		});
-
-		return metadata;
-	}
-
-	/**
-	 * Built-in: Get paginated links (outgoing and backlinks) for a note
-	 */
-	private async getNoteLinks(params: {
-		filepath: string;
-		includeOutgoing?: boolean;
-		includeBacklinks?: boolean;
-		resolvePaths?: boolean;
-		limit?: number;
-		offset?: number;
-	}): Promise<any> {
-		const {
-			filepath,
-			includeOutgoing = true,
-			includeBacklinks = true,
-			resolvePaths = true,
-			limit = 100,
-			offset = 0
-		} = params;
-
-		const file = this.app.vault.getAbstractFileByPath(filepath);
-		if (!file || !(file instanceof TFile)) {
-			throw new Error(`File not found: ${filepath}`);
-		}
-
-		const links = await this.metadataExtractor.getPaginatedLinks(file, {
-			includeOutgoing,
-			includeBacklinks,
-			resolvePaths,
-			limit,
-			offset
-		});
-
-		return {
-			filepath,
-			...links
-		};
-	}
-
-	/**
-	 * Built-in: Resolve wiki links to file paths (batch operation)
-	 */
-	private async resolveWikiLinks(params: {
-		links: string[];
-		sourcePath?: string;
-	}): Promise<any> {
-		const { links, sourcePath = '' } = params;
-
-		if (!Array.isArray(links)) {
-			throw new Error('links parameter must be an array');
-		}
-
-		const resolved = await this.metadataExtractor.resolveWikiLinks(links, sourcePath);
-
-		return {
-			count: links.length,
-			resolved
-		};
-	}
-
-	/**
-	 * Convert glob pattern to regex
-	 */
-	private globToRegex(pattern: string): RegExp {
-		// Simple glob to regex conversion
-		// ** → .*
-		// * → [^/]*
-		// ? → .
-		let regex = pattern
-			.replace(/\*\*/g, '___DOUBLESTAR___')
-			.replace(/\*/g, '[^/]*')
-			.replace(/___DOUBLESTAR___/g, '.*')
-			.replace(/\?/g, '.');
-
-		return new RegExp(`^${regex}$`);
 	}
 }
