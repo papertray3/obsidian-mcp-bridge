@@ -6,6 +6,7 @@ import { App, TFile } from 'obsidian';
 export interface DataviewExecutionResult {
 	renderedMarkdown?: string;
 	renderedHtml?: string;
+	data?: any; // Raw data from the query (when available)
 	elapsedMs: number;
 	warnings?: string[];
 	errors?: string[];
@@ -19,6 +20,7 @@ interface DataviewPlugin {
 	api?: {
 		// DQL execution
 		tryQueryMarkdown?: (query: string, sourcePath?: string) => Promise<string | null>;
+		query?: (source: string, originFile?: string) => Promise<{ successful: boolean; value: any; error?: string }>;
 
 		// DataviewJS execution
 		executeJs?: (code: string, container: HTMLElement, component: any, filePath: string) => Promise<void>;
@@ -75,7 +77,7 @@ export class DataviewHelper {
 	 *
 	 * @param query - The DQL query string (without the ```dataview wrapper)
 	 * @param contextPath - File path to use as execution context
-	 * @returns Execution result with rendered markdown
+	 * @returns Execution result with rendered markdown and raw data
 	 */
 	async runDataview(query: string, contextPath?: string): Promise<DataviewExecutionResult> {
 		const startTime = Date.now();
@@ -103,7 +105,16 @@ export class DataviewHelper {
 		}
 
 		try {
-			// Execute the query
+			// Execute the query to get raw data
+			let rawData: any = undefined;
+			if (dvPlugin.api.query) {
+				const queryResult = await dvPlugin.api.query(query, sourcePath);
+				if (queryResult.successful) {
+					rawData = this.serializeDataviewValue(queryResult.value);
+				}
+			}
+
+			// Execute the query for markdown rendering
 			const result = await dvPlugin.api.tryQueryMarkdown?.(query, sourcePath);
 
 			if (result === null || result === undefined) {
@@ -117,6 +128,7 @@ export class DataviewHelper {
 			return {
 				success: true,
 				renderedMarkdown: result,
+				data: rawData,
 				elapsedMs: Date.now() - startTime
 			};
 		} catch (error) {
@@ -188,9 +200,72 @@ export class DataviewHelper {
 			register: () => {},
 		};
 
+		// Capture data by intercepting dv.table, dv.list, etc.
+		let capturedData: any = undefined;
+
+		// Wrap the script to capture data
+		const wrappedScript = `
+(function() {
+	const originalTable = dv.table;
+	const originalList = dv.list;
+	const originalTaskList = dv.taskList;
+
+	let __capturedData = {
+		outputs: []
+	};
+
+	dv.table = function(headers, rows) {
+		__capturedData.outputs.push({
+			type: 'table',
+			headers: headers,
+			rows: rows || []
+		});
+		return originalTable.call(this, headers, rows);
+	};
+
+	dv.list = function(items) {
+		__capturedData.outputs.push({
+			type: 'list',
+			items: items || []
+		});
+		return originalList.call(this, items);
+	};
+
+	dv.taskList = function(tasks, groupByFile = true) {
+		__capturedData.outputs.push({
+			type: 'taskList',
+			tasks: tasks || [],
+			groupByFile: groupByFile
+		});
+		return originalTaskList.call(this, tasks, groupByFile);
+	};
+
+	${scriptToRun}
+
+	// Store captured data in window for retrieval
+	window.__dataviewCapturedData = __capturedData;
+})();
+`;
+
 		try {
 			// Execute the script
-			await dvPlugin.api.executeJs?.(scriptToRun, container, component, sourcePath);
+			await dvPlugin.api.executeJs?.(wrappedScript, container, component, sourcePath);
+
+			// Retrieve captured data
+			// @ts-ignore
+			if (window.__dataviewCapturedData) {
+				// @ts-ignore
+				const captured = window.__dataviewCapturedData;
+				if (captured.outputs && captured.outputs.length > 0) {
+					// Serialize all captured outputs
+					capturedData = {
+						outputs: captured.outputs.map((output: any) => this.serializeDataviewValue(output))
+					};
+				}
+				// Clean up
+				// @ts-ignore
+				delete window.__dataviewCapturedData;
+			}
 
 			// Extract the rendered content
 			const renderedHtml = container.innerHTML;
@@ -203,6 +278,7 @@ export class DataviewHelper {
 				success: true,
 				renderedMarkdown,
 				renderedHtml,
+				data: capturedData,
 				elapsedMs: Date.now() - startTime
 			};
 		} catch (error) {
@@ -390,6 +466,58 @@ export class DataviewHelper {
 			.replace(/<br\s*\/?>/gi, ' ')
 			.replace(/<[^>]*>/g, '')
 			.trim();
+	}
+
+	/**
+	 * Serialize Dataview values to plain JSON
+	 * Handles DataArray, Links, Dates, and other Dataview-specific types
+	 */
+	private serializeDataviewValue(value: any): any {
+		// Null or undefined
+		if (value === null || value === undefined) {
+			return value;
+		}
+
+		// DataArray - has .array property
+		if (value && typeof value === 'object' && 'array' in value && Array.isArray(value.array)) {
+			return value.array.map((item: any) => this.serializeDataviewValue(item));
+		}
+
+		// Regular Array
+		if (Array.isArray(value)) {
+			return value.map((item: any) => this.serializeDataviewValue(item));
+		}
+
+		// Date object
+		if (value instanceof Date) {
+			return value.toISOString();
+		}
+
+		// Link object - has .path property
+		if (value && typeof value === 'object' && 'path' in value) {
+			return {
+				path: value.path,
+				display: value.display || value.path,
+				type: value.type || 'file'
+			};
+		}
+
+		// Duration object - has .values property
+		if (value && typeof value === 'object' && 'values' in value && typeof value.toString === 'function') {
+			return value.toString();
+		}
+
+		// Plain object - recursively serialize
+		if (value && typeof value === 'object' && value.constructor === Object) {
+			const result: any = {};
+			for (const [key, val] of Object.entries(value)) {
+				result[key] = this.serializeDataviewValue(val);
+			}
+			return result;
+		}
+
+		// Primitive or unknown - return as-is
+		return value;
 	}
 
 	/**

@@ -2,6 +2,7 @@ import { App, TFile, Vault, Notice } from 'obsidian';
 import * as yaml from 'js-yaml';
 import * as fs from 'fs';
 import * as path from 'path';
+import { logger } from './logger';
 
 /**
  * Tool definition from YAML
@@ -103,27 +104,27 @@ export class ToolRegistry {
 	 */
 	async initialize(): Promise<void> {
 		if (this.initialized) {
-			console.log('MCP Bridge: Tool registry already initialized, skipping');
+			logger.debug('Tool registry already initialized, skipping');
 			return;
 		}
 
-		console.log('MCP Bridge: Initializing tool registry...');
+		logger.info('Initializing tool registry...');
 
 		// Ensure directories exist
 		await this.ensureDirectories();
-		console.log('MCP Bridge: Directories ensured');
+		logger.debug('Directories ensured');
 
 		// Load tools.yaml
 		await this.loadConfig();
-		console.log('MCP Bridge: Config loaded');
+		logger.debug('Config loaded');
 
 		// Load handlers
 		await this.loadHandlers();
-		console.log('MCP Bridge: Handlers loaded');
+		logger.debug('Handlers loaded');
 
 		// Generate MCP config
 		await this.generateMCPConfig();
-		console.log('MCP Bridge: MCP config generated');
+		logger.debug('MCP config generated');
 
 		// Setup file watcher if auto_reload enabled
 		if (this.config?.config.auto_reload) {
@@ -131,7 +132,7 @@ export class ToolRegistry {
 		}
 
 		this.initialized = true;
-		console.log(`MCP Bridge: Tool registry initialized with ${this.getAllTools().length} tools`);
+		logger.info(`Tool registry initialized with ${this.getAllTools().length} tools`);
 	}
 
 	/**
@@ -147,7 +148,7 @@ export class ToolRegistry {
 		for (const dir of dirs) {
 			if (!fs.existsSync(dir)) {
 				fs.mkdirSync(dir, { recursive: true });
-				console.log(`MCP Bridge: Created directory: ${dir}`);
+				logger.debug(`Created directory: ${dir}`);
 			}
 		}
 	}
@@ -157,18 +158,18 @@ export class ToolRegistry {
 	 */
 	private async loadConfig(): Promise<void> {
 		try {
-			console.log('MCP Bridge: Loading tool configurations...');
+			logger.info('Loading tool configurations...');
 
 			// 1. Load plugin defaults (always present)
 			const defaults = await this.loadYaml(this.defaultsPath);
 			if (!defaults) {
 				throw new Error('Plugin defaults not found - corrupted installation');
 			}
-			console.log(`Loaded ${defaults.tools.builtin?.length || 0} builtin tools from defaults`);
+			logger.debug(`Loaded ${defaults.tools.builtin?.length || 0} builtin tools from defaults`);
 
 			// 2. Discover user-defined tools
 			const userTools = await this.discoverUserTools();
-			console.log(`Discovered ${userTools.length} user tools`);
+			logger.debug(`Discovered ${userTools.length} user tools`);
 
 			// 3. Merge configurations
 			this.config = {
@@ -184,9 +185,9 @@ export class ToolRegistry {
 			// 4. Validate final configuration
 			this.validateConfig();
 
-			console.log(`MCP Bridge: Tool registry loaded - ${this.getStats().total} total tools`);
+			logger.info(`Tool registry loaded - ${this.getStats().total} total tools`);
 		} catch (error) {
-			console.error('MCP Bridge: Failed to load configuration:', error);
+			logger.error('Failed to load configuration:', error);
 			new Notice('MCP Bridge: Failed to load tool configuration - see console for details', 5000);
 			throw error;
 		}
@@ -204,7 +205,7 @@ export class ToolRegistry {
 			const content = fs.readFileSync(filePath, 'utf8');
 			return yaml.load(content);
 		} catch (error) {
-			console.error(`Failed to parse YAML file ${filePath}:`, error);
+			logger.error(`Failed to parse YAML file ${filePath}:`, error);
 			return null;
 		}
 	}
@@ -225,14 +226,14 @@ export class ToolRegistry {
 
 			// Check if directory exists
 			if (!fs.existsSync(absolutePath)) {
-				console.log(`MCP Bridge: Tool search path does not exist: ${searchPath} (${absolutePath})`);
+				logger.debug(`Tool search path does not exist: ${searchPath} (${absolutePath})`);
 				continue;
 			}
 
 			// Check if it's a directory
 			const stats = fs.statSync(absolutePath);
 			if (!stats.isDirectory()) {
-				console.warn(`MCP Bridge: Tool search path is not a directory: ${searchPath}`);
+				logger.warn(`Tool search path is not a directory: ${searchPath}`);
 				continue;
 			}
 
@@ -241,26 +242,26 @@ export class ToolRegistry {
 				const files = fs.readdirSync(absolutePath)
 					.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
 
-				console.log(`MCP Bridge: Searching ${searchPath} - found ${files.length} YAML files`);
+				logger.debug(`Searching ${searchPath} - found ${files.length} YAML files`);
 
 				for (const file of files) {
 					const filePath = path.join(absolutePath, file);
 					const toolDef = await this.loadYaml(filePath);
 
 					if (!toolDef) {
-						console.warn(`MCP Bridge: Failed to load user tool: ${file} from ${searchPath}`);
+						logger.warn(`Failed to load user tool: ${file} from ${searchPath}`);
 						continue;
 					}
 
 					// Validate required fields
 					if (!toolDef.name || !toolDef.description || !toolDef.handler || !toolDef.inputSchema) {
-						console.warn(`MCP Bridge: Invalid tool definition in ${file} - missing required fields`);
+						logger.warn(`Invalid tool definition in ${file} - missing required fields`);
 						continue;
 					}
 
 					// Check for duplicate tool names across all search paths
 					if (seenToolNames.has(toolDef.name)) {
-						console.warn(`MCP Bridge: Duplicate tool name "${toolDef.name}" found in ${searchPath}/${file} - skipping`);
+						logger.warn(`Duplicate tool name "${toolDef.name}" found in ${searchPath}/${file} - skipping`);
 						continue;
 					}
 
@@ -269,10 +270,10 @@ export class ToolRegistry {
 					const toolWithSource = toolDef as ToolDefinition;
 					toolWithSource._sourcePath = searchPath;
 					userTools.push(toolWithSource);
-					console.log(`MCP Bridge: Discovered user tool: ${toolDef.name} from ${searchPath}/${file}`);
+					logger.debug(`Discovered user tool: ${toolDef.name} from ${searchPath}/${file}`);
 				}
 			} catch (error) {
-				console.error(`MCP Bridge: Error discovering tools in ${searchPath}:`, error);
+				logger.error(`Error discovering tools in ${searchPath}:`, error);
 			}
 		}
 
@@ -386,24 +387,24 @@ export class ToolRegistry {
 							const handler = require(resolved);
 							if (handler && typeof handler.execute === 'function') {
 								this.handlers.set(tool.name, handler);
-								console.log(`MCP Bridge: Loaded handler for user tool: ${tool.name} from ${resolved}`);
+								logger.debug(`Loaded handler for user tool: ${tool.name} from ${resolved}`);
 								loaded = true;
 								break;
 							} else {
-								console.error(`MCP Bridge: Handler found at ${resolved} but missing execute() function`);
+								logger.error(`Handler found at ${resolved} but missing execute() function`);
 								loaded = true; // don't try other candidates for this one
 								break;
 							}
 						} catch (err) {
-							console.error(`MCP Bridge: Error loading handler candidate ${candidate} for ${tool.name}:`, err);
+							logger.error(`Error loading handler candidate ${candidate} for ${tool.name}:`, err);
 						}
 					}
 
 					if (!loaded) {
-						console.warn(`MCP Bridge: Handler not found for ${tool.name}. Tried: ${candidates.join(', ')}`);
+						logger.warn(`Handler not found for ${tool.name}. Tried: ${candidates.join(', ')}`);
 					}
 				} catch (error) {
-					console.error(`MCP Bridge: Failed to load handler for ${tool.name}:`, error);
+					logger.error(`Failed to load handler for ${tool.name}:`, error);
 				}
 			}
 		}
@@ -418,7 +419,7 @@ export class ToolRegistry {
 			if (fs.existsSync(this.defaultsPath)) {
 				fs.watch(this.defaultsPath, async (eventType) => {
 					if (eventType === 'change') {
-						console.log('MCP Bridge: Plugin defaults changed, reloading...');
+						logger.info('Plugin defaults changed, reloading...');
 						await this.reload();
 					}
 				});
@@ -428,15 +429,15 @@ export class ToolRegistry {
 			if (fs.existsSync(this.vaultConfigDir)) {
 				fs.watch(this.vaultConfigDir, { recursive: true }, async (eventType, filename) => {
 					if (filename && (filename.endsWith('.yaml') || filename.endsWith('.js'))) {
-						console.log(`MCP Bridge: Vault config changed (${filename}), reloading...`);
+						logger.info(`Vault config changed (${filename}), reloading...`);
 						await this.reload();
 					}
 				});
 			}
 
-			console.log('MCP Bridge: File watcher active');
+			logger.debug('File watcher active');
 		} catch (error) {
-			console.error('MCP Bridge: Failed to setup file watcher:', error);
+			logger.error('Failed to setup file watcher:', error);
 		}
 	}
 
@@ -458,9 +459,9 @@ export class ToolRegistry {
 			await this.generateMCPConfig();
 			this.cachedAllTools = []; // Invalidate cache
 			new Notice('MCP Bridge: Tool registry reloaded');
-			console.log('MCP Bridge: Tool registry reloaded successfully');
+			logger.info('Tool registry reloaded successfully');
 		} catch (error) {
-			console.error('MCP Bridge: Failed to reload:', error);
+			logger.error('Failed to reload:', error);
 			new Notice('MCP Bridge: Failed to reload - see console for details', 5000);
 		}
 	}
@@ -490,7 +491,7 @@ export class ToolRegistry {
 		const outputPath = path.join(this.generatedPath, 'mcp-config.json');
 		fs.writeFileSync(outputPath, JSON.stringify(mcpConfig, null, 2));
 
-		console.log(`MCP Bridge: Generated MCP config at ${outputPath}`);
+		logger.debug(`Generated MCP config at ${outputPath}`);
 	}
 
 	/**
@@ -498,7 +499,7 @@ export class ToolRegistry {
 	 */
 	getAllTools(): ToolDefinition[] {
 		if (!this.config) {
-			console.warn('MCP Bridge: getAllTools() called but config is null - registry may not be initialized');
+			logger.warn('getAllTools() called but config is null - registry may not be initialized');
 			return [];
 		}
 
@@ -551,7 +552,7 @@ export class ToolRegistry {
 			const result = await handler.execute(params, context);
 			return result;
 		} catch (error) {
-			console.error(`MCP Bridge: Error executing ${name}:`, error);
+			logger.error(`Error executing ${name}:`, error);
 			throw error;
 		}
 	}
@@ -637,7 +638,7 @@ export class ToolRegistry {
 		// Ensure user tools directory exists
 		if (!fs.existsSync(this.userToolsDir)) {
 			fs.mkdirSync(this.userToolsDir, { recursive: true });
-			console.log(`MCP Bridge: Created user tools directory: ${this.userToolsDir}`);
+			logger.debug(`Created user tools directory: ${this.userToolsDir}`);
 		}
 
 		// Determine filename
@@ -672,12 +673,12 @@ export class ToolRegistry {
 		// Write to file
 		try {
 			fs.writeFileSync(filePath, yaml.dump(toolYaml, { indent: 2 }));
-			console.log(`MCP Bridge: Tool "${toolDefinition.name}" added successfully at ${filePath}`);
+			logger.info(`Tool "${toolDefinition.name}" added successfully at ${filePath}`);
 
 			// Reload tool registry to pick up the new tool
 			await this.reload();
 		} catch (error) {
-			console.error(`MCP Bridge: Failed to add tool "${toolDefinition.name}":`, error);
+			logger.error(`Failed to add tool "${toolDefinition.name}":`, error);
 			throw error;
 		}
 	}

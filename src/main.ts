@@ -7,6 +7,7 @@ import * as path from 'path';
 import { RenderedContentCacheManager, CacheSettings } from './cache-manager';
 import { runDataviewBlock, extractDataviewBlocks } from './handlers/dataview-block';
 import { MetadataExtractor } from './metadata-extractor';
+import { logger } from './logger';
 
 export default class MCPBridgePlugin extends Plugin {
 	settings: MCPBridgeSettings;
@@ -17,6 +18,7 @@ export default class MCPBridgePlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+		logger.setLevel(this.settings.logLevel);
 
 		// Initialize cache manager
 		const vaultBasePath = (this.app.vault.adapter as any).basePath;
@@ -52,9 +54,9 @@ export default class MCPBridgePlugin extends Plugin {
 		try {
 			await this.toolRegistry.initialize();
 			const stats = this.toolRegistry.getStats();
-			console.log(`MCP Bridge: Tool registry initialized (${stats.total} tools: ${stats.builtin} builtin, ${stats.user} user)`);
+			logger.info(`Tool registry initialized (${stats.total} tools: ${stats.builtin} builtin, ${stats.user} user)`);
 		} catch (error) {
-			console.error('MCP Bridge: Failed to initialize tool registry:', error);
+			logger.error('Failed to initialize tool registry:', error);
 			new Notice('MCP Bridge: Failed to initialize tool registry - see console', 5000);
 		}
 
@@ -65,8 +67,9 @@ export default class MCPBridgePlugin extends Plugin {
 		try {
 			this.server.start();
 			new Notice(`MCP Bridge: Server started on ${this.settings.host}:${this.settings.port}`);
+			logger.info(`Server started on ${this.settings.host}:${this.settings.port}`);
 		} catch (error) {
-			console.error('MCP Bridge: Failed to start server:', error);
+			logger.error('Failed to start server:', error);
 			new Notice('MCP Bridge: Failed to start server. Check console for details.', 5000);
 		}
 
@@ -111,7 +114,7 @@ export default class MCPBridgePlugin extends Plugin {
 			}
 		});
 
-		console.log('MCP Bridge plugin loaded - extensible tool registry');
+		logger.info('Plugin loaded - extensible tool registry active');
 	}
 
 	onunload() {
@@ -121,7 +124,7 @@ export default class MCPBridgePlugin extends Plugin {
 		// Cleanup tool registry
 		this.toolRegistry.destroy();
 
-		console.log('MCP Bridge plugin unloaded');
+		logger.info('Plugin unloaded');
 	}
 
 	async loadSettings() {
@@ -142,16 +145,14 @@ export default class MCPBridgePlugin extends Plugin {
 	async handleRequest(request: MCPRequest): Promise<any> {
 		const { method, params = {} } = request;
 
-		console.log(`MCP Bridge: Handling request: ${method}`, params);
-		console.log(`MCP Bridge: Method name length: ${method.length}, method bytes: ${method.split('').map(c => c.charCodeAt(0)).join(',')}`);
+		logger.debug(`Handling request: ${method}`, params);
 
 		try {
 			// Check if this is a tool in the registry
-			console.log(`MCP Bridge: Checking if '${method}' is a registered tool...`);
 			const tool = this.toolRegistry.getTool(method);
 
 			if (tool) {
-				console.log(`MCP Bridge: Found tool '${method}', handler type: ${tool.handler}`);
+				logger.debug(`Found tool: ${method} (handler: ${tool.handler})`);
 				// Route to appropriate handler
 				if (tool.handler === 'builtin') {
 					return this.handleBuiltinTool(method, params);
@@ -161,15 +162,10 @@ export default class MCPBridgePlugin extends Plugin {
 				}
 			}
 
-			console.log(`MCP Bridge: '${method}' not a tool, checking fallback methods...`);
-			console.log(`MCP Bridge: Method string comparison - is it 'tools/list'? ${method === 'tools/list'}`);
-			console.log(`MCP Bridge: Method string comparison - is it 'ping'? ${method === 'ping'}`);
-
 			// Fallback for special methods
-			console.log(`MCP Bridge: About to switch on method: '${method}' (type: ${typeof method})`);
+			logger.debug(`Method '${method}' not in registry, checking special methods`);
 			switch (method) {
 				case 'ping':
-					console.log(`MCP Bridge: Handling ping request`);
 					return {
 						status: 'ok',
 						timestamp: Date.now(),
@@ -189,52 +185,45 @@ export default class MCPBridgePlugin extends Plugin {
 
 				case 'tools/list':
 					// Return all available tools
-					console.log(`MCP Bridge: Matched tools/list case`);
-					try {
-						console.log(`MCP Bridge: Listing tools...`);
-						const allTools = this.toolRegistry?.getAllTools() || [];
-						console.log(`MCP Bridge: Found ${allTools.length} tools`);
-						
-						// Build response incrementally to avoid blocking
-						const toolsArray: any[] = [];
-						for (const t of allTools) {
-							const toolDef = {
-								name: t.name,
-								description: t.description,
-								inputSchema: t.inputSchema,
-								...(t.outputSchema && { outputSchema: t.outputSchema }),
-								...(t.category && { category: t.category }),
-								...(t.tags && { tags: t.tags })
-							};
-							
-							// Log first tool to debug schema format
-							if (toolsArray.length === 0) {
-								console.log(`MCP Bridge: First tool schema:`, JSON.stringify(toolDef, null, 2));
-							}
-							
-							toolsArray.push(toolDef);
-						}
-						
-						console.log(`MCP Bridge: Returning ${toolsArray.length} tools with schemas`);
-						return {
-							tools: toolsArray
+				try {
+					const allTools = this.toolRegistry?.getAllTools() || [];
+					logger.debug(`Listing ${allTools.length} tools`);
+
+					// Build response incrementally to avoid blocking
+					const toolsArray: any[] = [];
+					for (const t of allTools) {
+						const toolDef = {
+							name: t.name,
+							description: t.description,
+							inputSchema: t.inputSchema,
+							...(t.outputSchema && { outputSchema: t.outputSchema }),
+							...(t.category && { category: t.category }),
+							...(t.tags && { tags: t.tags })
 						};
-					} catch (error) {
-						console.error('Error listing tools:', error);
-						return {
-							tools: [],
-							error: `Failed to list tools: ${error instanceof Error ? error.message : 'Unknown error'}`
-						};
+
+						toolsArray.push(toolDef);
 					}
 
-				default:
-					console.log(`MCP Bridge: Unknown method: '${method}'`);
-					throw new Error(`Unknown method: ${method}`);
-			}
-		} catch (error) {
-			console.error(`MCP Bridge: Error in handleRequest for '${method}':`, error);
-			throw error;
+					logger.debug(`Returning ${toolsArray.length} tools with schemas`);
+					return {
+						tools: toolsArray
+					};
+				} catch (error) {
+					logger.error('Error listing tools:', error);
+					return {
+						tools: [],
+						error: `Failed to list tools: ${error instanceof Error ? error.message : 'Unknown error'}`,
+					};
+				}
+
+			default:
+				logger.warn(`Unknown method: '${method}'`);
+				throw new Error(`Unknown method: ${method}`);
 		}
+	} catch (error) {
+		logger.error(`Error handling request '${method}':`, error);
+		throw error;
+	}
 	}
 
 	/**

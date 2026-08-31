@@ -1,5 +1,6 @@
 import type MCPBridgePlugin from './main';
 import { SimpleWebSocketServer, SimpleWebSocket } from './simple-websocket';
+import { logger } from './logger';
 
 export interface MCPRequest {
 	auth?: string;
@@ -26,7 +27,7 @@ export class MCPWebSocketServer {
 
 	start(): void {
 		if (this.httpServer) {
-			console.warn('MCP Bridge: WebSocket server already running');
+			logger.warn('WebSocket server already running');
 			return;
 		}
 
@@ -41,39 +42,39 @@ export class MCPWebSocketServer {
 			this.wsServer = new SimpleWebSocketServer(this.httpServer);
 
 			this.wsServer.onconnection = (ws: SimpleWebSocket, req: any) => {
-				console.log('MCP Bridge: Client connected');
+				logger.debug('Client connected');
 				this.clients.add(ws);
 
 				this.handleConnection(ws);
 
 				ws.onclose = () => {
 					this.clients.delete(ws);
-					console.log('MCP Bridge: Client disconnected');
+					logger.debug('Client disconnected');
 				};
 			};
 
 			this.wsServer.onerror = (error: Error) => {
-				console.error('MCP Bridge: WebSocket server error:', error);
+				logger.error('WebSocket server error:', error);
 			};
 
 			// Start HTTP server with better error handling
 			this.httpServer.on('error', (err: any) => {
-				console.error('MCP Bridge: HTTP server error:', err);
+				logger.error('HTTP server error:', err);
 				if (err.code === 'EADDRINUSE') {
-					console.error(`Port ${port} is already in use. Change port in settings.`);
+					logger.error(`Port ${port} is already in use. Change port in settings.`);
 				}
 			});
 
 			// Log immediately that we're trying to start
-			console.log(`MCP Bridge: Attempting to start server on ${host}:${port}...`);
+			logger.info(`Attempting to start server on ${host}:${port}...`);
 
 			this.httpServer.listen(port, host, () => {
-				console.log(`MCP Bridge: ✅ WebSocket server listening on ${host}:${port}`);
+				logger.info(`✅ WebSocket server listening on ${host}:${port}`);
 			});
 
 		} catch (error) {
-			console.error('MCP Bridge: Failed to start WebSocket server:', error);
-			console.error('MCP Bridge: Error details:', error);
+			logger.error('Failed to start WebSocket server:', error);
+			logger.error('Error details:', error);
 			throw error;
 		}
 	}
@@ -87,7 +88,7 @@ export class MCPWebSocketServer {
 
 		if (this.httpServer) {
 			this.httpServer.close(() => {
-				console.log('MCP Bridge: WebSocket server stopped');
+				logger.info('WebSocket server stopped');
 			});
 			this.httpServer = null;
 		}
@@ -101,9 +102,9 @@ export class MCPWebSocketServer {
 		ws.onmessage = async (msg) => {
 			let request: MCPRequest | undefined;
 			try {
-				console.log('MCP Bridge: WebSocket message received');
+				logger.debug('WebSocket message received');
 				request = JSON.parse(msg.data) as MCPRequest;
-				console.log(`MCP Bridge: Parsed request: ${request.method}`);
+				logger.debug(`Parsed request: ${request.method}`);
 
 				// Authenticate
 				if (this.plugin.settings.requireAuth) {
@@ -118,19 +119,19 @@ export class MCPWebSocketServer {
 				}
 
 				// Handle request
-				console.log(`MCP Bridge: About to call handleRequest for ${request.method}`);
+				logger.debug(`Calling handler for ${request.method}`);
 				const result = await this.plugin.handleRequest(request);
-				console.log(`MCP Bridge: handleRequest returned for ${request.method}`);
+				logger.debug(`Handler returned for ${request.method}`);
 				const response: MCPResponse = {
 					result,
 					id: request.id
 				};
-				console.log(`MCP Bridge: About to send response for ${request.method}`);
+				logger.debug(`Sending response for ${request.method}`);
 				ws.send(JSON.stringify(response));
-				console.log(`MCP Bridge: Response sent for ${request.method}`);
+				logger.debug(`Response sent for ${request.method}`);
 
 			} catch (error) {
-				console.error('MCP Bridge: Request handling error:', error);
+				logger.error('Request handling error:', error);
 				const response: MCPResponse = {
 					error: error instanceof Error ? error.message : 'Unknown error',
 					id: request?.id
@@ -140,7 +141,7 @@ export class MCPWebSocketServer {
 		};
 
 		ws.onerror = (error: Error) => {
-			console.error('MCP Bridge: WebSocket connection error:', error);
+			logger.error('WebSocket connection error:', error);
 		};
 	}
 
@@ -150,13 +151,13 @@ export class MCPWebSocketServer {
 	 */
 	broadcast(message: any): void {
 		const messageStr = typeof message === 'string' ? message : JSON.stringify(message);
-		console.log(`MCP Bridge: Broadcasting to ${this.clients.size} clients:`, messageStr);
+		logger.debug(`Broadcasting to ${this.clients.size} clients:`, messageStr);
 
 		for (const client of this.clients) {
 			try {
 				client.send(messageStr);
 			} catch (error) {
-				console.error('MCP Bridge: Error broadcasting to client:', error);
+				logger.error('Error broadcasting to client:', error);
 			}
 		}
 	}

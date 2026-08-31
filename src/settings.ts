@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
+import { logger, LogLevel } from './logger';
 
 export interface MCPBridgeSettings {
 	// Connection settings
@@ -32,6 +33,9 @@ export interface MCPBridgeSettings {
 
 	// Tool discovery settings
 	toolSearchPaths: string[];
+
+	// Logging settings
+	logLevel: LogLevel;
 }
 
 export const DEFAULT_SETTINGS: MCPBridgeSettings = {
@@ -48,6 +52,7 @@ export const DEFAULT_SETTINGS: MCPBridgeSettings = {
 	cacheDirPath: '.obsidian/cache/mcp-bridge-render',
 	cacheMaxSizeMB: 100,
 	toolSearchPaths: ['.obsidian/mcp-bridge/tools'],
+	logLevel: 'info',
 };
 
 export class MCPBridgeSettingsTab extends PluginSettingTab {
@@ -264,6 +269,24 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 			<p>WebSocket Server: <strong>${this.plugin.isServerRunning() ? '🟢 Running' : '🔴 Stopped'}</strong></p>
 			<p>Listening on: <strong>${this.plugin.settings.host}:${this.plugin.settings.port}</strong></p>
 		`;
+
+		// === Logging ===
+		containerEl.createEl('h3', { text: 'Logging' });
+
+		new Setting(containerEl)
+			.setName('Log level')
+			.setDesc('Controls how much detail MCP Bridge writes to the developer console. Use Debug when troubleshooting.')
+			.addDropdown(dropdown => dropdown
+				.addOption('debug', 'Debug')
+				.addOption('info', 'Info')
+				.addOption('warn', 'Warn')
+				.addOption('error', 'Error')
+				.setValue(this.plugin.settings.logLevel)
+				.onChange(async (value: LogLevel) => {
+					this.plugin.settings.logLevel = value;
+					logger.setLevel(value);
+					await this.plugin.saveSettings();
+				}));
 
 		// === Tool Discovery ===
 		containerEl.createEl('h3', { text: 'Tool Discovery' });
