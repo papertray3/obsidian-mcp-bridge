@@ -3,8 +3,131 @@ import type MCPBridgePlugin from './main';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import * as yaml from 'js-yaml';
 import { logger, LogLevel } from './logger';
+
+const API_KEY_PLACEHOLDER = '<copy your key here>';
+
+/** Slugifies a vault name into the underscore-separated form used in generated server names. */
+function vaultSlug(name: string): string {
+	return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+interface ClientConfigParams {
+	serverName: string;
+	/** OS-native path (backslashes on Windows) - for formats that don't need JSON escaping, e.g. TOML literal strings. */
+	mainJsPath: string;
+	/** Forward-slash path - safe to drop into a JSON string without escaping. */
+	mainJsPathForward: string;
+	apiKey: string;
+	port: number;
+}
+
+interface ClientAgentDef {
+	id: string;
+	label: string;
+	/** A caveat shown above the config when the format/location isn't fully verified against current vendor docs. */
+	note?: string;
+	getConfigPath: (homeDir: string, vaultBasePath: string) => string;
+	renderConfig: (params: ClientConfigParams) => string;
+}
+
+function jsonMcpServers(params: ClientConfigParams): string {
+	return JSON.stringify({
+		mcpServers: {
+			[params.serverName]: {
+				command: 'node',
+				args: [params.mainJsPathForward],
+				env: {
+					OBSIDIAN_MCP_KEY: params.apiKey,
+					OBSIDIAN_PORT: String(params.port)
+				}
+			}
+		}
+	}, null, 2);
+}
+
+const CLIENT_AGENTS: ClientAgentDef[] = [
+	{
+		id: 'claude-code',
+		label: 'Claude Code',
+		getConfigPath: (_home, vaultBasePath) => path.join(vaultBasePath, '.mcp.json'),
+		renderConfig: jsonMcpServers
+	},
+	{
+		id: 'codex',
+		label: 'Codex',
+		getConfigPath: (home) => path.join(home, '.codex', 'config.toml'),
+		renderConfig: ({ serverName, mainJsPath, apiKey, port }) =>
+			`[mcp_servers.${serverName}]\n` +
+			`command = "node"\n` +
+			`args = [\n` +
+			`  '${mainJsPath}',\n` +
+			`]\n` +
+			`env = { OBSIDIAN_MCP_KEY = "${apiKey}", OBSIDIAN_PORT = "${port}" }`
+	},
+	{
+		id: 'gemini-cli',
+		label: 'Gemini CLI',
+		getConfigPath: (home) => path.join(home, '.gemini', 'settings.json'),
+		renderConfig: jsonMcpServers
+	},
+	{
+		id: 'mistral-vibe',
+		label: 'Mistral Vibe',
+		note: '⚠️ Config location/format for Mistral Vibe could not be verified - this follows the common MCP JSON convention as a starting point. Check its docs to confirm.',
+		getConfigPath: (home) => path.join(home, '.vibe', 'config.json'),
+		renderConfig: jsonMcpServers
+	},
+	{
+		id: 'opencode',
+		label: 'OpenCode',
+		note: '⚠️ OpenCode also supports a project-level opencode.json in your vault root - check its docs to confirm which your version uses.',
+		getConfigPath: (home) => path.join(home, '.config', 'opencode', 'opencode.json'),
+		renderConfig: ({ serverName, mainJsPathForward, apiKey, port }) =>
+			JSON.stringify({
+				mcp: {
+					[serverName]: {
+						type: 'local',
+						command: ['node', mainJsPathForward],
+						environment: {
+							OBSIDIAN_MCP_KEY: apiKey,
+							OBSIDIAN_PORT: String(port)
+						}
+					}
+				}
+			}, null, 2)
+	},
+	{
+		id: 'kiro',
+		label: 'Kiro',
+		note: 'Kiro also supports a global config at ~/.kiro/settings/mcp.json - use that instead if you want this available across all workspaces.',
+		getConfigPath: (_home, vaultBasePath) => path.join(vaultBasePath, '.kiro', 'settings', 'mcp.json'),
+		renderConfig: ({ serverName, mainJsPathForward, apiKey, port }) =>
+			JSON.stringify({
+				mcpServers: {
+					[serverName]: {
+						command: 'node',
+						args: [mainJsPathForward],
+						env: {
+							OBSIDIAN_MCP_KEY: apiKey,
+							OBSIDIAN_PORT: String(port)
+						},
+						disabled: false,
+						autoApprove: []
+					}
+				}
+			}, null, 2)
+	},
+	{
+		id: 'hermes-agent',
+		label: 'Hermes Agent',
+		note: '⚠️ Hermes Agent\'s config format/location could not be verified - this is a best-effort guess based on common MCP client conventions. Check its docs to confirm.',
+		getConfigPath: (home) => path.join(home, '.hermes', 'config.json'),
+		renderConfig: jsonMcpServers
+	}
+];
 
 export interface MCPBridgeSettings {
 	// Connection settings
@@ -57,6 +180,7 @@ export const DEFAULT_SETTINGS: MCPBridgeSettings = {
 
 export class MCPBridgeSettingsTab extends PluginSettingTab {
 	plugin: MCPBridgePlugin;
+	activeClientTab: string = CLIENT_AGENTS[0].id;
 
 	constructor(app: App, plugin: MCPBridgePlugin) {
 		super(app, plugin);
@@ -179,6 +303,13 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 					this.plugin.settings.requireAuth = value;
 					await this.plugin.saveSettings();
 				}));
+
+		// === Client Configuration ===
+		containerEl.createEl('h3', { text: 'Connect an AI Agent' });
+		containerEl.createEl('p', {
+			text: 'Pick your agent below for the config block and file it goes in.'
+		}).style.color = 'var(--text-muted)';
+		this.renderClientConfigSection(containerEl);
 
 		// === SSL/TLS Settings (only show if remote enabled) ===
 		if (this.plugin.settings.enableRemote) {
@@ -458,6 +589,82 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 		} else {
 			containerEl.createDiv().setText('No tools discovered.');
 		}
+	}
+
+	/**
+	 * Renders the tabbed "connect an AI agent" section: one tab per client type,
+	 * each showing where its MCP config file lives and a ready-to-paste block.
+	 */
+	private renderClientConfigSection(containerEl: HTMLElement): void {
+		const vaultBasePath = (this.app.vault.adapter as any).basePath;
+		const homeDir = os.homedir();
+		const mainJsPath = path.join(vaultBasePath, '.obsidian', 'plugins', this.plugin.manifest.id, 'servers', 'node', 'dist', 'main.js');
+		const mainJsPathForward = mainJsPath.split(path.sep).join('/');
+		const serverName = `obsidian_mcp_${vaultSlug(this.app.vault.getName())}`;
+
+		// Tab bar
+		const tabBar = containerEl.createDiv({ cls: 'mcp-client-tabs' });
+		tabBar.style.display = 'flex';
+		tabBar.style.flexWrap = 'wrap';
+		tabBar.style.gap = '4px';
+		tabBar.style.marginBottom = '12px';
+
+		for (const agent of CLIENT_AGENTS) {
+			const isActive = agent.id === this.activeClientTab;
+			const btn = tabBar.createEl('button', { text: agent.label });
+			if (isActive) btn.addClass('mod-cta');
+			btn.onclick = () => {
+				this.activeClientTab = agent.id;
+				this.display();
+			};
+		}
+
+		const activeAgent = CLIENT_AGENTS.find(a => a.id === this.activeClientTab) ?? CLIENT_AGENTS[0];
+		const configParams: ClientConfigParams = {
+			serverName,
+			mainJsPath,
+			mainJsPathForward,
+			apiKey: API_KEY_PLACEHOLDER,
+			port: this.plugin.settings.port
+		};
+
+		if (activeAgent.note) {
+			const noteEl = containerEl.createEl('p', { text: activeAgent.note });
+			noteEl.style.color = 'var(--text-warning)';
+			noteEl.style.fontSize = '0.85em';
+		}
+
+		containerEl.createEl('p', { text: 'Config file:' }).style.marginBottom = '4px';
+		const pathEl = containerEl.createEl('code', { text: activeAgent.getConfigPath(homeDir, vaultBasePath) });
+		pathEl.style.display = 'block';
+		pathEl.style.padding = '6px 10px';
+		pathEl.style.marginBottom = '12px';
+		pathEl.style.backgroundColor = 'var(--background-secondary)';
+		pathEl.style.borderRadius = '4px';
+		pathEl.style.userSelect = 'text';
+
+		const codeBlock = containerEl.createEl('pre');
+		codeBlock.style.backgroundColor = 'var(--background-secondary)';
+		codeBlock.style.padding = '12px';
+		codeBlock.style.borderRadius = '4px';
+		codeBlock.style.overflowX = 'auto';
+		codeBlock.style.fontSize = '0.85em';
+		codeBlock.createEl('code', { text: activeAgent.renderConfig(configParams) });
+
+		new Setting(containerEl)
+			.setDesc('Copies the block with your real API key filled in.')
+			.addButton(button => button
+				.setButtonText('Copy Config')
+				.setCta()
+				.onClick(() => {
+					if (!this.plugin.settings.apiKey) {
+						new Notice('No API key set yet - generate one in Security Settings first');
+						return;
+					}
+					const realConfig = activeAgent.renderConfig({ ...configParams, apiKey: this.plugin.settings.apiKey });
+					navigator.clipboard.writeText(realConfig);
+					new Notice(`${activeAgent.label} config copied to clipboard`);
+				}));
 	}
 
 	/**
