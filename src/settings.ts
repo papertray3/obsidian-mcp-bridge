@@ -423,18 +423,19 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 		// === Tool Discovery ===
 		containerEl.createEl('h3', { text: 'Tool Discovery' });
 
+		let searchPathInputEl: HTMLInputElement;
 		new Setting(containerEl)
 			.setName('Add Tool Search Path')
 			.setDesc('Add a directory to search for custom tool definitions (relative to vault root)')
 			.addText(text => {
 				text.setPlaceholder('_kants/System/mcp');
-				text.inputEl.id = 'mcp-search-path-input';
+				searchPathInputEl = text.inputEl;
 			})
 			.addButton(button => button
 				.setButtonText('Add Path')
 				.setCta()
 				.onClick(async () => {
-					const input = document.getElementById('mcp-search-path-input') as HTMLInputElement;
+					const input = searchPathInputEl;
 					const newPath = input.value.trim();
 
 					if (!newPath) {
