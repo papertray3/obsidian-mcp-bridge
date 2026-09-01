@@ -245,6 +245,7 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 					const { shell } = require('electron');
 					const path = require('path');
 					const fs = require('fs');
+					const os = require('os');
 
 					// Get plugin directory using vault adapter
 					const vaultBasePath = (this.app.vault.adapter as any).basePath;
@@ -257,9 +258,20 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 						return;
 					}
 
-					// Open in default browser
+					// Bake the configured host/port into a temp copy so it opens pre-filled.
+					// (A file:// URL query string would be the cleaner way to pass this through,
+					// but on Windows shell.openExternal resolves file:// URLs via ShellExecute,
+					// which treats the whole thing as a filesystem path and silently drops the
+					// query string - so the harness always fell back to its hardcoded defaults.)
+					let html = fs.readFileSync(testHarnessPath, 'utf8');
+					html = html.replace(/(<input type="text" id="host" value=")[^"]*(")/, `$1${this.plugin.settings.host}$2`);
+					html = html.replace(/(<input type="number" id="port" value=")[^"]*(")/, `$1${this.plugin.settings.port}$2`);
+
+					const tempHarnessPath = path.join(os.tmpdir(), 'obsidian-mcp-bridge-test-harness.html');
+					fs.writeFileSync(tempHarnessPath, html);
+
 					try {
-						await shell.openPath(testHarnessPath);
+						await shell.openPath(tempHarnessPath);
 						new Notice('Test harness opened in browser');
 					} catch (error) {
 						console.error('Failed to open test harness:', error);
@@ -282,6 +294,7 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 			})
 			.addButton(button => button
 				.setButtonText('Regenerate')
+				.setWarning()
 				.onClick(async () => {
 					this.plugin.settings.apiKey = randomUUID();
 					await this.plugin.saveSettings();
