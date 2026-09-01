@@ -189,6 +189,7 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 
 	display(): void {
 		const { containerEl } = this;
+		const scrollTop = containerEl.scrollTop;
 		containerEl.empty();
 
 		containerEl.createEl('h2', { text: 'MCP Bridge Settings' });
@@ -589,6 +590,8 @@ export class MCPBridgeSettingsTab extends PluginSettingTab {
 		} else {
 			containerEl.createDiv().setText('No tools discovered.');
 		}
+
+		containerEl.scrollTop = scrollTop;
 	}
 
 	/**
